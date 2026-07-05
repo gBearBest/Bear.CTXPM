@@ -1,0 +1,8 @@
+/docs/**
+!/docs/
+!/docs/ctxpm-skill.md
+!/docs/ctxpm-yaml.md
+!/docs/README.en.md
+!/docs/README.ja.md
+!/docs/README.ko.md
+!/docs/README.zh-CN.md
