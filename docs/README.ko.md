@@ -56,7 +56,7 @@ resource type은 콘텐츠의 형태를 설명합니다. Bear.CTXPM v0.1의 표�
 
 ### entrypoint
 
-`entrypoint`는 agent가 읽기 위해 프로젝트 루트에 배치되는 Markdown 엔트리 파일입니다. 예를 들어 `AGENTS.md`, `CLAUDE.md`가 있습니다. Bear.CTXPM은 엔트리포인트 문서 안의 `ctxpm` 관리 블록을 통해 여러 agent에 일관된 리소스 읽기 지침을 제공합니다.
+`entrypoint`는 agent가 읽기 위해 프로젝트 루트에 배치되는 Markdown 엔트리 파일입니다. 예를 들어 `AGENTS.md`, `CLAUDE.md`가 있습니다. Bear.CTXPM은 엔트리포인트 문서 안의 `ctxpm` 관리 블록을 통해 여러 agent에 일관된 리소스 읽기 지침을 제공합니다. 관리 블록은 `INSTALL.md`에 정의된 canonical template을 사용해야 하며, 파일마다 달라질 수 있는 것은 해당 엔트리포인트의 agent 식별자뿐입니다. 기본적으로 관리 대상 리소스는 해당 resource type에 대해 선언된 각 agent가 인식할 수 있는 discovery directory에도 compatibility symlink로 노출되며, canonical 콘텐츠는 `.ctxpm/...` 아래에 유지됩니다.
 
 ## 권장 디렉터리 구조
 

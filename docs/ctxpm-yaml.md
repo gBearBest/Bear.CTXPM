@@ -74,7 +74,7 @@ Recommended fields:
 | --- | --- |
 | `source` | Upstream source metadata for update detection. |
 | `version` | Hash-based installed version. Required when the resource comes from GitHub or a direct URL. |
-| `compatibility` | List of compatibility symlink paths outside `.ctxpm`. |
+| `compatibility` | List of compatibility symlink paths outside `.ctxpm`, normally covering each confirmed agent's recognizable discovery directories for the resource type. |
 
 GitHub dependency example:
 
@@ -146,7 +146,7 @@ Optional fields:
 
 | Field | Description |
 | --- | --- |
-| `compatibility` | List of compatibility symlink paths outside `.ctxpm`. |
+| `compatibility` | List of compatibility symlink paths outside `.ctxpm`, normally covering each confirmed agent's recognizable discovery directories for the resource type. |
 
 Example:
 
@@ -185,6 +185,8 @@ Rules:
 - Keys should match entries in `agents`.
 - `file` is the root entrypoint Markdown file.
 - `mode` should be `managed` when the file contains a managed `ctxpm` block.
+- The referenced file's managed block should begin with `<!-- ctxpm:begin agent=<entrypoint-key> -->`.
+- Managed entrypoint blocks should use the canonical `ctxpm` template defined by the protocol; only the `agent` value in the opening marker changes per entrypoint file.
 
 ## Compatibility Paths
 
@@ -199,7 +201,8 @@ compatibility:
 
 Rules:
 
-- Compatibility paths point from old/default locations to canonical `.ctxpm` locations.
+- Compatibility paths point from agent-recognizable discovery locations to canonical `.ctxpm` locations.
+- By default, create compatibility paths for every confirmed agent that has a recognizable discovery directory for the resource type.
 - Do not create reverse symlinks from `.ctxpm` back to old/default locations.
 - Add compatibility paths to `.gitignore` when they are symlinks or compatibility facades.
 - Prefer one safe directory-level `.gitignore` rule over many per-resource rules when a directory contains only compatibility facades.
@@ -207,6 +210,7 @@ Rules:
   - Use `.agents/` only when the whole `.agents/` directory is a compatibility surface and contains no project-owned files that should remain tracked.
 - If a directory mixes compatibility facades with real project-owned files, use narrower child-directory rules or individual compatibility path rules.
 - Even when `.gitignore` uses a consolidated directory rule, keep `compatibility` entries precise in `ctxpm.yaml`.
+- If a confirmed agent has no recognizable discovery directory for a resource type, omit compatibility for that agent/type pair.
 
 ## Editing Rules
 

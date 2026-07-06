@@ -56,7 +56,7 @@ Bear.CTXPM v0.1 首先是一套协议，而不是一个必须先安装的工具�
 
 ### entrypoint
 
-`entrypoint` 指项目根目录中供 agent 读取的 Markdown 入口文件，例如 `AGENTS.md`、`CLAUDE.md`。Bear.CTXPM 会通过入口文档中的 `ctxpm` 受管区块，为不同 agent 提供一致的资源读取说明。
+`entrypoint` 指项目根目录中供 agent 读取的 Markdown 入口文件，例如 `AGENTS.md`、`CLAUDE.md`。Bear.CTXPM 会通过入口文档中的 `ctxpm` 受管区块，为不同 agent 提供一致的资源读取说明。受管区块应使用 `INSTALL.md` 中定义的 canonical template，各文件之间只应变更入口文件对应的 agent 标识符。默认情况下，受管资源还应通过 compatibility symlink 暴露到每个已声明 agent 可识别的对应资源类型发现目录中，而 canonical 内容仍保留在 `.ctxpm/...` 下。
 
 ## 推荐目录结构
 

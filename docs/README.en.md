@@ -56,7 +56,7 @@ A resource type describes the shape of the content. Standard resource types in B
 
 ### entrypoint
 
-An `entrypoint` is a Markdown entry file in the project root for agents to read, such as `AGENTS.md` or `CLAUDE.md`. Bear.CTXPM uses the managed `ctxpm` block in entrypoint documents to provide consistent resource reading instructions for different agents.
+An `entrypoint` is a Markdown entry file in the project root for agents to read, such as `AGENTS.md` or `CLAUDE.md`. Bear.CTXPM uses the managed `ctxpm` block in entrypoint documents to provide consistent resource reading instructions for different agents. Managed blocks should use the canonical template from `INSTALL.md`, with only the entrypoint agent identifier changing between files. By default, managed resources are also exposed through compatibility symlinks in every declared agent's recognizable discovery directories for the corresponding resource type, while canonical content stays under `.ctxpm/...`.
 
 ## Recommended Directory Structure
 

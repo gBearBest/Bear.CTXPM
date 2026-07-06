@@ -56,7 +56,7 @@ resource type は、コンテンツの形態を表します。Bear.CTXPM v0.1 �
 
 ### entrypoint
 
-`entrypoint` は、agent が読むためにプロジェクトルートに置かれる Markdown エントリーファイルです。例として `AGENTS.md` や `CLAUDE.md` があります。Bear.CTXPM は、エントリーポイント文書内の `ctxpm` 管理ブロックを通じて、異なる agent に一貫したリソース読み取り手順を提供します。
+`entrypoint` は、agent が読むためにプロジェクトルートに置かれる Markdown エントリーファイルです。例として `AGENTS.md` や `CLAUDE.md` があります。Bear.CTXPM は、エントリーポイント文書内の `ctxpm` 管理ブロックを通じて、異なる agent に一貫したリソース読み取り手順を提供します。管理ブロックは `INSTALL.md` で定義された canonical template を使用し、ファイルごとに変えてよいのは対応する agent 識別子だけです。デフォルトでは、管理対象リソースは対応する resource type について、宣言済みの各 agent が認識できる discovery directory に compatibility symlink としても公開し、canonical な内容は `.ctxpm/...` 配下に維持します。
 
 ## 推奨ディレクトリ構造
 

@@ -277,8 +277,8 @@ When a resource is a project-local asset:
 1. Move the real resource content to `.ctxpm/packages/<plural-type>/...`.
 2. Keep the name as clear and stable as possible.
 3. Do not satisfy migration by creating a symlink inside `.ctxpm` that points back to the original resource path. `.ctxpm/packages/` must become the canonical storage location.
-4. If the original path must remain for compatibility with AI agents or tools that auto-discover supported directories, replace the original path with a compatibility symlink pointing to the migrated resource under `.ctxpm/packages/`.
-5. Add an appropriate compatibility ignore rule to `.gitignore` using the consolidation strategy in section 5.9, so the symlink or compatibility facade is not treated as the canonical tracked resource.
+4. By default, create compatibility symlinks for the migrated resource in every confirmed agent's recognizable discovery directories for that resource type. If the original path is one of those discovery paths, replace the original path with a compatibility symlink pointing to the migrated resource under `.ctxpm/packages/`.
+5. Add an appropriate compatibility ignore rule to `.gitignore` using the consolidation strategy in section 5.9, so the compatibility symlink or compatibility facade is not treated as the canonical tracked resource.
 6. If the original resource path was tracked by Git, try to remove it from version control with `git rm --cached` after the canonical content has been moved under `.ctxpm/packages/`.
 7. Record the canonical managed location and any compatibility symlink in `ctxpm.yaml`.
 8. Avoid breaking the existing semantics of user content.
@@ -289,7 +289,7 @@ When a resource is an external asset:
 
 1. Move the real resource content to `.ctxpm/dependencies/<plural-type>/...`.
 2. Do not satisfy migration by creating a symlink inside `.ctxpm` that points back to the original resource path. `.ctxpm/dependencies/` must become the canonical local workspace for external resources.
-3. If the original path must remain for compatibility with AI agents or tools that auto-discover supported directories, replace the original path with a compatibility symlink pointing to the migrated resource under `.ctxpm/dependencies/`.
+3. By default, create compatibility symlinks for the migrated resource in every confirmed agent's recognizable discovery directories for that resource type. If the original path is one of those discovery paths, replace the original path with a compatibility symlink pointing to the migrated resource under `.ctxpm/dependencies/`.
 4. Add `.ctxpm/dependencies/` and an appropriate compatibility ignore rule to `.gitignore` using the consolidation strategy in section 5.9.
 5. If the original resource path was tracked by Git, try to remove it from version control with `git rm --cached` after the canonical content has been moved under `.ctxpm/dependencies/`.
 6. If there is only a local copy and the remote source cannot be confirmed, record the current migrated location as the temporary local source.
@@ -305,7 +305,7 @@ When a resource is an external asset:
 - Do not lose context for the sake of tidiness.
 - When a resource is unclear, pause automatic migration and report it first.
 - The canonical resource content must live under `.ctxpm/packages/` or `.ctxpm/dependencies/` after migration.
-- Compatibility symlinks are allowed only at the original locations, pointing forward to the migrated `.ctxpm` locations. Do not create reverse symlinks from `.ctxpm` back to the old locations.
+- Compatibility symlinks are allowed at original locations and at agent-recognizable discovery locations, always pointing forward to the migrated `.ctxpm` locations. Do not create reverse symlinks from `.ctxpm` back to the old locations.
 - Before replacing an original path with a symlink, check for path conflicts and avoid overwriting user content.
 
 ### 5.6 Generate or Update `ctxpm.yaml`
@@ -323,7 +323,7 @@ Follow these rules:
 
 - `version` is fixed at `1`.
 - `project.name` uses the project name or root directory name.
-- `agents` contains the currently confirmed agent.
+- `agents` contains the currently confirmed agents.
 - `dependencies` records external resources.
 - `packages` records project-local resources.
 - `entrypoints` records the entrypoint file for the current agent with `mode: managed`.
@@ -391,30 +391,39 @@ dependencies:
 
 Write or update the managed `ctxpm` block in the entrypoint file for the selected agent.
 
-The managed block must use this format:
+The managed block must use this canonical template:
 
 ```md
-<!-- ctxpm:begin agent=codex -->
-... managed guidance ...
-<!-- ctxpm:end -->
-```
+<!-- ctxpm:begin agent=<agent-id> -->
+This project uses `ctxpm` to manage AI resources.
 
-The block content must at least explain:
-
-1. This project uses `ctxpm` to manage AI resources.
-2. `.ctxpm/packages/` contains project-local resources and should be read first.
-3. `.ctxpm/dependencies/` contains external resources and should be read second.
-4. The default resource lookup order is:
+Read AI resources in this order:
+1. Read `ctxpm.yaml`.
+2. Read `.ctxpm/packages/` before `.ctxpm/dependencies/`.
+3. Within each root, use this default lookup order:
    - `rules`
    - `skills`
    - `specs`
    - `prompts`
    - `mcp`
-5. Project-local resources take precedence when resources conflict.
-6. Future AI resources must not be installed into agent default locations directly. Before creating, reading, updating, or deleting any AI resource, AI must use the `ctxpm` skill if present, or otherwise follow the same `ctxpm` classification, migration, compatibility-symlink, `.gitignore`, source-version, update-detection, and `ctxpm.yaml` update rules in this document.
-7. New external AI resources must be installed as `dependency` resources under `.ctxpm/dependencies/`, not as project-local `package` resources, unless the user explicitly confirms they should become project-maintained assets. If the external resource comes from GitHub or a direct URL, its hash-based `version` must be recorded in `ctxpm.yaml`.
-8. New project-local AI resources must be installed as `package` resources under `.ctxpm/packages/` and recorded in `ctxpm.yaml`.
-9. The `ctxpm` dependency must also be exposed through the selected agent's default skill discovery directory by a compatibility symlink, so the agent can discover and invoke it from its normal skill or slash-command UI.
+4. When resources conflict, project-local `packages` take precedence over external `dependencies`.
+
+Do not install AI resources directly into agent default locations. Before creating, reading, updating, or deleting any AI resource, use the `ctxpm` skill if it is available. Otherwise follow the same `ctxpm` classification, migration, compatibility-symlink, `.gitignore`, source-version, update-detection, and `ctxpm.yaml` update rules used by this project.
+
+Install new external AI resources as `dependency` resources under `.ctxpm/dependencies/`, not as project-local `package` resources, unless the user explicitly confirms they should become project-maintained assets. For GitHub or direct URL resources, record the hash-based `version` in `ctxpm.yaml`.
+
+Install new project-local AI resources as `package` resources under `.ctxpm/packages/` and record them in `ctxpm.yaml`.
+
+Expose the bundled `ctxpm` dependency through this agent's default skill discovery compatibility path or paths so the agent can discover and invoke it through its normal skill or command surface. Subsequent AI resources should be installed and managed through the `ctxpm` skill, which creates and records the required compatibility paths for each declared agent and resource type while keeping canonical content under `.ctxpm/...`.
+<!-- ctxpm:end -->
+```
+
+Template rules:
+
+1. Replace only `<agent-id>` with the `entrypoints` key for the current file, such as `codex` for `AGENTS.md` or `claude-code` for `CLAUDE.md`.
+2. Keep the body text identical across managed entrypoint files unless a future Bear.CTXPM specification revision changes the canonical template.
+3. Do not add agent-specific AI resource management rules inside the managed block. Put any extra agent-specific guidance outside the managed block.
+4. If any declared agent uses multiple compatibility paths for a resource type, keep the canonical body text unchanged and record the exact paths in `ctxpm.yaml`.
 
 If the entrypoint file does not exist, create it.  
 If the entrypoint file exists but has no managed block, insert one.  
@@ -430,11 +439,12 @@ At minimum, this step must:
 
 1. Create or update `.ctxpm/dependencies/skills/ctxpm/SKILL.md`.
 2. Copy or write the complete `ctxpm.yaml` format document into the skill directory as `.ctxpm/dependencies/skills/ctxpm/ctxpm-yaml.md`, using the Bear.CTXPM `docs/ctxpm-yaml.md` source specification when it is available.
-3. Immediately create compatibility symlinks in the selected agent's default skill discovery directories, such as `.agents/skills/ctxpm`, so the agent can discover the skill from its normal skill or slash-command UI.
+3. Immediately create compatibility symlinks in every confirmed agent's default skill discovery directories, such as `.agents/skills/ctxpm`, so each agent can discover the skill from its normal skill or slash-command UI.
 4. Record `ctxpm` in `ctxpm.yaml` as an external `dependency` of type `skill`.
 5. Record both the canonical `.ctxpm/dependencies/...` path and every compatibility symlink path in `ctxpm.yaml`.
 6. Do not omit the `compatibility` field for `ctxpm`.
-7. Ensure the generated `SKILL.md` contains a compact `ctxpm.yaml` format reference and points to the sibling `ctxpm-yaml.md` companion document.
+7. Record a compatibility path in `ctxpm.yaml` for every confirmed agent's supported skill discovery directory.
+8. Ensure the generated `SKILL.md` contains a compact `ctxpm.yaml` format reference and points to the sibling `ctxpm-yaml.md` companion document.
 
 ### 5.9 Adjust `.gitignore`
 
@@ -478,7 +488,7 @@ After installation, report:
 8. Which ownership decisions were established through explicit project evidence.
 9. Which resources remain unresolved and require user confirmation before migration.
 10. Whether the `ctxpm` dependency was created or updated.
-11. Whether the `ctxpm` compatibility symlink was created in the selected agent's default skill discovery directory.
+11. Whether compatibility symlinks for `ctxpm` were created in every confirmed agent's default skill discovery directories.
 12. Whether the managed entrypoint block now instructs future AI agents to use `ctxpm` rules for AI resource CRUD operations.
 13. Which external dependencies have hash-based versions recorded, and which still require source or entry-file confirmation.
 14. Whether `.ctxpm/dependencies/skills/ctxpm/ctxpm-yaml.md` was created or updated as the `ctxpm` skill companion document.
@@ -559,9 +569,9 @@ After completion, the project should at least satisfy:
 7. `.gitignore` ignores `.ctxpm/dependencies/`.
 8. `.ctxpm/dependencies/skills/ctxpm/SKILL.md` exists and is recorded in `ctxpm.yaml`.
 9. `.ctxpm/dependencies/skills/ctxpm/ctxpm-yaml.md` exists as a companion document for the `ctxpm` skill.
-10. A compatibility symlink for `ctxpm` exists in the selected agent's default skill discovery directory, such as `.agents/skills/ctxpm` when that directory is used.
-11. The `ctxpm` dependency entry in `ctxpm.yaml` records both the canonical `.ctxpm/dependencies/...` path and the compatibility symlink path.
-12. The managed entrypoint block instructs future AI agents to use `ctxpm` or the same `ctxpm` workflow before creating, reading, updating, or deleting AI resources.
+10. Compatibility symlinks for managed resources exist in each confirmed agent's recognizable discovery directories for the corresponding resource types.
+11. The `ctxpm` dependency entry in `ctxpm.yaml` records both the canonical `.ctxpm/dependencies/...` path and every compatibility symlink path.
+12. The managed entrypoint block uses the canonical `ctxpm` template and instructs future AI agents to use `ctxpm` or the same `ctxpm` workflow before creating, reading, updating, or deleting AI resources.
 13. Future AI resources continue to be managed using the same `ctxpm` rules instead of agent default install locations.
 14. External dependencies installed from GitHub or direct URLs record hash-based `version` values in `ctxpm.yaml` for future update detection.
 15. The complete YAML format lives in `.ctxpm/dependencies/skills/ctxpm/ctxpm-yaml.md`.
