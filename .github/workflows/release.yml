@@ -142,7 +142,9 @@ jobs:
           cd release-assets
           find . -maxdepth 1 -type f ! -name "checksums.txt" -print0 \
             | sort -z \
-            | xargs -0 sha256sum > checksums.txt
+            | while IFS= read -r -d '' file; do
+                sha256sum "${file#./}"
+              done > checksums.txt
 
       - name: Upload checksum artifact
         uses: actions/upload-artifact@v4

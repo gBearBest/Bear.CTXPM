@@ -241,7 +241,7 @@ echo "Installing ctxpm ${TAG} for ${OS}/${ARCH} (${INSTALL_SCOPE})..."
 curl -fsSL "${BASE_URL}/${ASSET}" -o "$ARCHIVE_PATH"
 curl -fsSL "${BASE_URL}/checksums.txt" -o "$CHECKSUMS_PATH"
 
-EXPECTED_SUM="$(awk -v file="$ASSET" '$2 == file {print $1}' "$CHECKSUMS_PATH")"
+EXPECTED_SUM="$(awk -v file="$ASSET" '$2 == file {print $1; exit}' "$CHECKSUMS_PATH")"
 if [ -z "$EXPECTED_SUM" ]; then
   echo "Could not find checksum entry for ${ASSET}." >&2
   exit 1
