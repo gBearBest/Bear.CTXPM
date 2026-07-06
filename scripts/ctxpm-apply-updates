@@ -1,0 +1,60 @@
+#!/bin/sh
+set -eu
+
+case "$0" in
+  */*) SCRIPT_PATH=${0%/*} ;;
+  *) SCRIPT_PATH=. ;;
+esac
+SCRIPT_DIR=$(
+  CDPATH= cd -- "$SCRIPT_PATH" && pwd
+)
+BACKEND="$SCRIPT_DIR/ctxpm-apply-updates.rb"
+
+print_help() {
+  cat <<'EOF'
+Usage: scripts/ctxpm-apply-updates [options] [dependency-name ...]
+        --manifest PATH              Path to ctxpm.yaml (default: ./ctxpm.yaml)
+        --state PATH                 Path to update state JSON (default: <project>/.ctxpm/state/update-checks.json)
+        --all                        Apply every currently available dependency update
+        --dry-run                    Resolve and report updates without changing files
+        --json                       Print machine-readable JSON output
+
+This shell entrypoint prefers the bundled Ruby reference backend when Ruby is available.
+If Ruby is unavailable, use the documented manual ctxpm update workflow instead.
+EOF
+}
+
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+  if command -v ruby >/dev/null 2>&1; then
+    exec ruby "$BACKEND" "$@"
+  fi
+  print_help
+  exit 0
+fi
+
+if command -v ruby >/dev/null 2>&1; then
+  exec ruby "$BACKEND" "$@"
+fi
+
+json_output=false
+for arg in "$@"; do
+  if [ "$arg" = "--json" ]; then
+    json_output=true
+    break
+  fi
+done
+
+if [ "$json_output" = true ]; then
+  cat <<'EOF'
+{
+  "status": "unavailable",
+  "reason": "Ruby is not installed, so the bundled ctxpm reference backend could not run.",
+  "fallback": "Use the documented manual ctxpm update workflow after user approval."
+}
+EOF
+else
+  echo "scripts/ctxpm-apply-updates could not run because Ruby is not installed."
+  echo "Use the documented manual ctxpm update workflow after user approval."
+fi
+
+exit 127

@@ -1,0 +1,59 @@
+#!/bin/sh
+set -eu
+
+case "$0" in
+  */*) SCRIPT_PATH=${0%/*} ;;
+  *) SCRIPT_PATH=. ;;
+esac
+SCRIPT_DIR=$(
+  CDPATH= cd -- "$SCRIPT_PATH" && pwd
+)
+BACKEND="$SCRIPT_DIR/ctxpm-check-updates.rb"
+
+print_help() {
+  cat <<'EOF'
+Usage: scripts/ctxpm-check-updates [options]
+        --manifest PATH              Path to ctxpm.yaml (default: ./ctxpm.yaml)
+        --state PATH                 Path to update state JSON (default: <project>/.ctxpm/state/update-checks.json)
+        --force                      Run the check even if the configured interval is not due yet
+        --json                       Print machine-readable JSON output
+
+This shell entrypoint prefers the bundled Ruby reference backend when Ruby is available.
+If Ruby is unavailable, use the documented manual ctxpm update-check workflow instead.
+EOF
+}
+
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+  if command -v ruby >/dev/null 2>&1; then
+    exec ruby "$BACKEND" "$@"
+  fi
+  print_help
+  exit 0
+fi
+
+if command -v ruby >/dev/null 2>&1; then
+  exec ruby "$BACKEND" "$@"
+fi
+
+json_output=false
+for arg in "$@"; do
+  if [ "$arg" = "--json" ]; then
+    json_output=true
+    break
+  fi
+done
+
+if [ "$json_output" = true ]; then
+  cat <<'EOF'
+{
+  "status": "unavailable",
+  "reason": "Ruby is not installed, so the bundled ctxpm reference backend could not run.",
+  "fallback": "Use the documented manual ctxpm periodic update-check workflow."
+}
+EOF
+else
+  echo "scripts/ctxpm-check-updates could not run because Ruby is not installed."
+  echo "Use the documented manual ctxpm periodic update-check workflow instead."
+fi
+
+exit 127

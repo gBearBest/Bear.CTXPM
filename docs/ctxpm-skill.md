@@ -68,6 +68,39 @@ When this skill installs or updates an external AI resource, it must record a ha
 - Do not use branch names, tags, `latest`, filenames, timestamps, or vague release labels as dependency versions.
 - If the source or entry-file hash cannot be confirmed, report the dependency as unresolved for version tracking instead of inventing a value.
 
+## Companion Update Scripts
+
+When companion update scripts are available, prefer them over manual AI file edits for dependency update detection and dependency update application.
+
+Reference script paths in the Bear.CTXPM repository:
+
+- `scripts/ctxpm-check-updates`
+- `scripts/ctxpm-apply-updates`
+
+These shell-first entry scripts may delegate to a bundled Ruby reference backend when Ruby is available:
+
+- `scripts/ctxpm-check-updates.rb`
+- `scripts/ctxpm-apply-updates.rb`
+
+If the reference backend runtime is unavailable, the shell entry scripts should fail clearly and AI should fall back to the documented manual workflow instead of inventing a silent partial update path.
+
+These scripts may maintain optional runtime state at `.ctxpm/state/update-checks.json`. That runtime state is not a required installation artifact and must not be treated as canonical protocol metadata.
+
+## Periodic Dependency Update Checks
+
+Periodic update checks apply to `dependencies` only.
+
+Rules:
+
+- Read `ctxpm.yaml` and use `update_policy` when it exists.
+- When `update_policy` is missing, default to `enabled: true`, `interval: 1d`, and `include_self: true`.
+- Use the shell-first companion check script when it is available.
+- Check `ctxpm` itself unless `update_policy.include_self` is explicitly `false`.
+- If updates are found, ask the user before applying any update.
+- If the user does not answer, leave dependencies unchanged.
+- If the companion scripts or their runtime backend are unavailable, AI may fall back to the documented manual update workflow, but it must keep the same approval-before-apply behavior.
+- When `ctxpm` itself is part of an approved update set, update it last so the currently loaded skill finishes the ongoing operation before the new skill files take effect.
+
 GitHub source example:
 
 ```yaml
@@ -119,6 +152,11 @@ project:
 agents:
   - codex
 
+update_policy:
+  enabled: true
+  interval: 1d
+  include_self: true
+
 dependencies:
   - name: external-resource
     type: skill
@@ -148,6 +186,7 @@ Format rules:
 - Resource `type` must be one of `skill`, `rule`, `spec`, `prompt`, or `mcp`.
 - `dependencies` are external resources under `.ctxpm/dependencies/`.
 - `packages` are project-local resources under `.ctxpm/packages/`.
+- `update_policy` configures periodic dependency update checks and does not authorize silent automatic updates.
 - GitHub dependencies use the installed commit SHA as `version`; do not duplicate it as `source.commit`.
 - Direct URL dependencies use `version: sha256:<hex>` from the entry file content.
 - `compatibility` lists agent-recognizable discovery paths that point to canonical `.ctxpm` paths, normally one or more per confirmed agent for the resource type.
@@ -203,6 +242,19 @@ Use this workflow when listing, auditing, or explaining AI resources.
 6. Check whether external dependencies have enough `source` and `version` metadata for update detection.
 7. Report unresolved or inconsistent resources; do not silently fix them unless the user asked for modification.
 
+### Periodic Update Check
+
+Use this workflow when the project opens after the configured interval has elapsed, or when the user explicitly asks to check dependency updates.
+
+1. Read `ctxpm.yaml` and load `update_policy`.
+2. Treat `dependencies` as the only periodic update-check targets; do not include project-local `packages`.
+3. Use `scripts/ctxpm-check-updates` when it is available.
+4. Allow the companion script to keep optional runtime state in `.ctxpm/state/update-checks.json`.
+5. If the configured interval is not due yet, report the current check state and stop.
+6. If updates are available, ask the user whether to update them.
+7. If the user does not answer, leave all dependencies unchanged.
+8. If the user approves updates, continue into the Update workflow with the approved dependency set.
+
 ### Update
 
 Use this workflow when updating existing AI resources.
@@ -210,13 +262,15 @@ Use this workflow when updating existing AI resources.
 1. Read `ctxpm.yaml`.
 2. For project-local `package` resources, update only when the user asks to modify project-maintained content.
 3. For external `dependency` resources, treat `version` as the installed baseline.
-4. For GitHub dependencies, compare the installed commit SHA in `version` with the latest commit SHA from the configured source.
-5. For URL dependencies, compare the installed `sha256:<hex>` version with the SHA-256 hash of the current entry file content.
-6. If unchanged, leave the local resource as-is.
-7. If changed, update the canonical `.ctxpm/dependencies/...` copy and set `version` to the new hash.
-8. Preserve compatibility symlinks.
-9. Do not update dependencies whose source, entry file, or update target cannot be determined.
-10. Update `ctxpm.yaml` whenever a resource is updated.
+4. Prefer `scripts/ctxpm-apply-updates` when it is available and the user has already approved the dependency set to update.
+5. For GitHub dependencies, compare the installed commit SHA in `version` with the latest commit SHA from the configured source.
+6. For URL dependencies, compare the installed `sha256:<hex>` version with the SHA-256 hash of the current entry file content.
+7. If unchanged, leave the local resource as-is.
+8. If changed, update the canonical `.ctxpm/dependencies/...` copy and set `version` to the new hash.
+9. Preserve compatibility symlinks.
+10. Update `ctxpm` last when it is part of a multi-dependency update set.
+11. Do not update dependencies whose source, entry file, or update target cannot be determined.
+12. Update `ctxpm.yaml` whenever a resource is updated.
 
 ### Delete / Remove
 
@@ -261,6 +315,12 @@ Use this skill whenever the user asks to create, add, install, list, inspect, ch
 17. When updating external dependencies, compare the recorded `version` with the current upstream hash before changing files.
 18. When deleting resources, confirm the intended removal scope before deleting canonical content.
 19. When maintaining a managed root entrypoint block, keep its body aligned with the canonical Bear.CTXPM `ctxpm` block template. Only the opening `agent=<entrypoint-key>` marker should vary between agent entrypoints.
+20. Prefer shell-first companion update scripts such as `scripts/ctxpm-check-updates` and `scripts/ctxpm-apply-updates` when they are available.
+21. Treat bundled Ruby helpers such as `scripts/ctxpm-check-updates.rb` and `scripts/ctxpm-apply-updates.rb` as a reference backend rather than a guaranteed system dependency.
+22. Treat `.ctxpm/state/update-checks.json` as optional runtime state rather than canonical protocol metadata.
+23. Periodic update checks apply to `dependencies` only and default to once per day when no explicit `update_policy.interval` is configured.
+24. Never apply dependency updates without explicit user approval; if the user does not answer, leave dependencies unchanged.
+25. When approved updates include `ctxpm`, update it last.
 
 ## ctxpm.yaml Format
 
@@ -274,6 +334,11 @@ project:
 
 agents:
   - codex
+
+update_policy:
+  enabled: true
+  interval: 1d
+  include_self: true
 
 dependencies:
   - name: external-resource
@@ -306,7 +371,7 @@ Rules:
 - `packages` are project-local resources under `.ctxpm/packages/`.
 - GitHub dependencies use the installed commit SHA as `version`; do not duplicate it as `source.commit`.
 - URL dependencies use `version: sha256:<hex>` from the entry file content.
-- `compatibility` lists old/default discovery paths that point to canonical `.ctxpm` paths.
+- `compatibility` lists agent-recognizable discovery paths that point to canonical `.ctxpm` paths, normally one or more per confirmed agent for the resource type.
 - `.gitignore` may consolidate many compatibility paths into one safe directory-level ignore rule, but `ctxpm.yaml` must still record each exact compatibility path.
 - Preserve unknown fields and unrelated entries unless they directly conflict with the requested change.
 
@@ -328,6 +393,7 @@ After changes, report:
 - canonical `.ctxpm` locations
 - compatibility symlinks created, preserved, or removed
 - source and hash-based version recorded for each external dependency
+- update-check status, including dependencies with updates available and any dependencies left unchanged because user approval was not granted
 - external dependencies whose version could not be resolved
 - `.gitignore` and `ctxpm.yaml` updates
 ````

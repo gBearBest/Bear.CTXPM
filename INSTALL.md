@@ -153,7 +153,7 @@ Do not create the following as required artifacts for v0.1:
 
 - `ctxpm.lock`
 - `.ctxpm/cache/`
-- `.ctxpm/state/`
+- `.ctxpm/state/` as a required installation artifact, although companion update scripts may create it later as optional runtime state
 
 ---
 
@@ -344,6 +344,11 @@ project:
 agents:
   - codex
 
+update_policy:
+  enabled: true
+  interval: 1d
+  include_self: true
+
 dependencies: []
 
 packages: []
@@ -450,10 +455,11 @@ At minimum, this step must:
 
 Check `.gitignore`.
 
-If it does not include the following rule, append it:
+If it does not include the following rules, append them:
 
 ```gitignore
 .ctxpm/dependencies/
+.ctxpm/state/
 ```
 
 Do not ignore `.ctxpm/packages/` by default because it is a project-local asset.
@@ -566,7 +572,7 @@ After completion, the project should at least satisfy:
 4. The root entrypoint file for the current agent exists.
 5. The entrypoint file contains a managed `ctxpm` block.
 6. Existing AI resources have been organized as `package` or `dependency` as much as possible.
-7. `.gitignore` ignores `.ctxpm/dependencies/`.
+7. `.gitignore` ignores both `.ctxpm/dependencies/` and `.ctxpm/state/`.
 8. `.ctxpm/dependencies/skills/ctxpm/SKILL.md` exists and is recorded in `ctxpm.yaml`.
 9. `.ctxpm/dependencies/skills/ctxpm/ctxpm-yaml.md` exists as a companion document for the `ctxpm` skill.
 10. Compatibility symlinks for managed resources exist in each confirmed agent's recognizable discovery directories for the corresponding resource types.

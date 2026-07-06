@@ -15,6 +15,11 @@ project:
 agents:
   - codex
 
+update_policy:
+  enabled: true
+  interval: 1d
+  include_self: true
+
 dependencies: []
 
 packages: []
@@ -32,9 +37,39 @@ entrypoints:
 | `version` | Yes | Format version. Must be `1` for Bear.CTXPM v0.1. |
 | `project.name` | Yes | Project name. Use the repository or root directory name when no explicit project name exists. |
 | `agents` | Yes | List of confirmed agent profiles used by the project. |
+| `update_policy` | No | Policy for periodic dependency update detection. |
 | `dependencies` | Yes | External AI resources managed under `.ctxpm/dependencies/`. Use an empty list when none exist. |
 | `packages` | Yes | Project-local AI resources managed under `.ctxpm/packages/`. Use an empty list when none exist. |
 | `entrypoints` | Yes | Root Markdown entrypoint files managed for each agent. |
+
+## `update_policy`
+
+`update_policy` configures periodic dependency update detection.
+
+Example:
+
+```yaml
+update_policy:
+  enabled: true
+  interval: 1d
+  include_self: true
+```
+
+Fields:
+
+| Field | Description |
+| --- | --- |
+| `enabled` | Whether periodic dependency update checks are enabled. Defaults to `true` when omitted. |
+| `interval` | Check cadence using forms like `12h`, `1d`, or `7d`. Defaults to `1d` when omitted. |
+| `include_self` | Whether the bundled `ctxpm` dependency participates in periodic checks and update prompts. Defaults to `true` when omitted. |
+
+Rules:
+
+- `update_policy` applies to `dependencies` only, not to project-local `packages`.
+- `update_policy` controls detection cadence, not automatic update permission.
+- AI must still ask the user before applying any dependency update.
+- If the user does not answer an update prompt, leave dependencies unchanged.
+- Companion update scripts may store runtime check state under `.ctxpm/state/update-checks.json`, but that runtime state does not belong in `ctxpm.yaml`.
 
 ## Resource Types
 
@@ -235,6 +270,11 @@ project:
 
 agents:
   - codex
+
+update_policy:
+  enabled: true
+  interval: 1d
+  include_self: true
 
 dependencies:
   - name: ctxpm
