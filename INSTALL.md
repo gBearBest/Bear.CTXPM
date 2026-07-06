@@ -3,8 +3,8 @@
 This document is an installation guide for AI agents to read and execute directly.  
 Users can give this file to any AI agent with project file read/write capability and ask it to connect the current project to the `ctxpm` protocol according to the ideas of Bear.CTXPM v0.1.
 
-You are not installing a command-line tool.  
-You are organizing the current project into an AI resource management project that conforms to the Bear.CTXPM protocol.
+You are not only installing a command-line tool.  
+You are organizing the current project into an AI resource management project that conforms to the Bear.CTXPM protocol, and you should install or prepare the companion `ctxpm` CLI when it is available so future AI resource operations can use the canonical CLI workflow.
 
 ---
 
@@ -23,6 +23,7 @@ Your execution goals:
 6. Move project-local AI resources into `.ctxpm/packages/`.
 7. Update `.gitignore` to ignore external AI resource directories.
 8. Record stable version hashes for external AI resources when their source is known.
+9. Install or prepare the companion `ctxpm` CLI when it is available, place it under the bundled `ctxpm` skill directory at `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm`, and verify that it can run.
 
 ---
 
@@ -62,10 +63,22 @@ The mapping between agents and default entrypoint files is:
 
 ## 3. Core Principles You Must Follow
 
-### 3.1 Bear.CTXPM Is a Protocol, Not a Tool
+### 3.1 Bear.CTXPM Is a Protocol First, with a Companion CLI
 
-Do not assume that the current project must install any CLI.  
+Do not confuse the Bear.CTXPM protocol with the companion CLI implementation.  
 The project adopts `ctxpm` through documentation, directory structure, and managed entrypoint blocks.
+
+However, when the official companion `ctxpm` CLI is available, install or prepare it early in the setup flow and prefer it for managed AI resource operations such as:
+
+- `ctxpm install`
+- `ctxpm add`
+- `ctxpm list`
+- `ctxpm check-updates`
+- `ctxpm update`
+- `ctxpm remove`
+- `ctxpm validate`
+
+If the CLI cannot be installed in the current environment, continue the protocol setup manually and report that the CLI setup could not be completed.
 
 ### 3.2 Use Only Two Semantics
 
@@ -153,7 +166,7 @@ Do not create the following as required artifacts for v0.1:
 
 - `ctxpm.lock`
 - `.ctxpm/cache/`
-- `.ctxpm/state/` as a required installation artifact, although companion update scripts may create it later as optional runtime state
+- `.ctxpm/state/` as a required installation artifact, although companion `ctxpm` CLI commands may create it later as optional runtime state
 
 ---
 
@@ -167,7 +180,29 @@ Follow these steps in order. Do not skip steps.
 2. Ask the user which agent they currently use if necessary.
 3. Select the corresponding entrypoint filename.
 
-### 5.2 Scan AI Resources in the Project
+### 5.2 Install or Prepare the Companion `ctxpm` CLI
+
+Before migrating resources, try to install or prepare the companion `ctxpm` CLI.
+
+Recommended order:
+
+1. First define the canonical project-local CLI target as `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm`.
+2. Check whether that project-local CLI path already exists and is runnable.
+3. If it is not already present, create the parent directory `.ctxpm/dependencies/skills/ctxpm/cli/`.
+4. If a global `ctxpm` command is already available in the environment, it may be used as the source binary, but the project installation should still place a copy or equivalent local executable at `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm`.
+5. If the local repository contains the CLI source under `cli/`, prefer building from source and placing the resulting binary at `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm`.
+6. If source build is not practical and the Bear.CTXPM repository contains `cli/install.sh`, use that installer in project mode so the CLI lands directly in the canonical project-local path.
+   - During the current pre-release phase, prefer the rolling `main` channel unless the user explicitly asked for a stable tagged version.
+   - Minimal project-local install: `sh cli/install.sh --scope project`
+   - Optional explicit form: `sh cli/install.sh --scope project --project-root . --version main`
+   - On Windows-like shell environments, project mode should still preserve the canonical launcher path `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm`, while also placing sibling helper launchers such as `ctxpm.exe` and `ctxpm.cmd` in the same directory when needed.
+7. The same installer may also be used independently for a global shell-wide install when the user wants a global `ctxpm` command.
+   - Minimal global install: `sh cli/install.sh --scope global`
+   - Optional explicit form: `sh cli/install.sh --scope global --version main`
+8. After installation, copy, or build, verify that `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm --help` succeeds.
+9. If CLI setup fails, do not stop the protocol installation. Continue with the manual workflow, but report clearly that the companion CLI could not be prepared.
+
+### 5.3 Scan AI Resources in the Project
 
 Scan all possible AI resources in the project, including but not limited to:
 
@@ -199,7 +234,7 @@ Recommended interaction flow:
 5. If a resource cannot be automatically identified with enough confidence, do not skip it. You must ask the user through interactive Q&A whether it should be treated as a project-local `package` or an external `dependency`.
 6. For each resource, report the evidence used for classification, including project-specific references, external metadata, source hints, and unresolved conflicts.
 
-### 5.3 Determine `package` vs `dependency`
+### 5.4 Determine `package` vs `dependency`
 
 Use these rules as explicit decision criteria. Do not classify ownership based on vague intuition or guesswork.
 
@@ -249,7 +284,7 @@ If unsure:
 4. If the evidence is conflicting or insufficient, mark the resource as unresolved, do not migrate it, and report that user input is still required.
 5. Never skip an existing resource merely because you cannot classify it automatically. Unclear ownership requires user interaction or an explicit unresolved report, not silent omission.
 
-### 5.4 Create the `.ctxpm/` Directories
+### 5.5 Create the `.ctxpm/` Directories
 
 If they do not already exist, create:
 
@@ -264,7 +299,7 @@ If they do not already exist, create:
 - `.ctxpm/packages/prompts/`
 - `.ctxpm/packages/mcp/`
 
-### 5.5 Migrate Existing Resources
+### 5.6 Migrate Existing Resources
 
 Organize the resources that have been identified.
 
@@ -278,7 +313,7 @@ When a resource is a project-local asset:
 2. Keep the name as clear and stable as possible.
 3. Do not satisfy migration by creating a symlink inside `.ctxpm` that points back to the original resource path. `.ctxpm/packages/` must become the canonical storage location.
 4. By default, create compatibility symlinks for the migrated resource in every confirmed agent's recognizable discovery directories for that resource type. If the original path is one of those discovery paths, replace the original path with a compatibility symlink pointing to the migrated resource under `.ctxpm/packages/`.
-5. Add an appropriate compatibility ignore rule to `.gitignore` using the consolidation strategy in section 5.9, so the compatibility symlink or compatibility facade is not treated as the canonical tracked resource.
+5. Add an appropriate compatibility ignore rule to `.gitignore` using the consolidation strategy in section 5.10, so the compatibility symlink or compatibility facade is not treated as the canonical tracked resource.
 6. If the original resource path was tracked by Git, try to remove it from version control with `git rm --cached` after the canonical content has been moved under `.ctxpm/packages/`.
 7. Record the canonical managed location and any compatibility symlink in `ctxpm.yaml`.
 8. Avoid breaking the existing semantics of user content.
@@ -290,7 +325,7 @@ When a resource is an external asset:
 1. Move the real resource content to `.ctxpm/dependencies/<plural-type>/...`.
 2. Do not satisfy migration by creating a symlink inside `.ctxpm` that points back to the original resource path. `.ctxpm/dependencies/` must become the canonical local workspace for external resources.
 3. By default, create compatibility symlinks for the migrated resource in every confirmed agent's recognizable discovery directories for that resource type. If the original path is one of those discovery paths, replace the original path with a compatibility symlink pointing to the migrated resource under `.ctxpm/dependencies/`.
-4. Add `.ctxpm/dependencies/` and an appropriate compatibility ignore rule to `.gitignore` using the consolidation strategy in section 5.9.
+4. Add `.ctxpm/dependencies/` and an appropriate compatibility ignore rule to `.gitignore` using the consolidation strategy in section 5.10.
 5. If the original resource path was tracked by Git, try to remove it from version control with `git rm --cached` after the canonical content has been moved under `.ctxpm/dependencies/`.
 6. If there is only a local copy and the remote source cannot be confirmed, record the current migrated location as the temporary local source.
 7. If the remote source is known, record `source` in `ctxpm.yaml`.
@@ -308,7 +343,7 @@ When a resource is an external asset:
 - Compatibility symlinks are allowed at original locations and at agent-recognizable discovery locations, always pointing forward to the migrated `.ctxpm` locations. Do not create reverse symlinks from `.ctxpm` back to the old locations.
 - Before replacing an original path with a symlink, check for path conflicts and avoid overwriting user content.
 
-### 5.6 Generate or Update `ctxpm.yaml`
+### 5.7 Generate or Update `ctxpm.yaml`
 
 Create or update `ctxpm.yaml` with at least:
 
@@ -392,7 +427,7 @@ dependencies:
     version: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 ```
 
-### 5.7 Write the Root Markdown Entrypoint File
+### 5.8 Write the Root Markdown Entrypoint File
 
 Write or update the managed `ctxpm` block in the entrypoint file for the selected agent.
 
@@ -413,13 +448,13 @@ Read AI resources in this order:
    - `mcp`
 4. When resources conflict, project-local `packages` take precedence over external `dependencies`.
 
-Do not install AI resources directly into agent default locations. Before creating, reading, updating, or deleting any AI resource, use the `ctxpm` skill if it is available. Otherwise follow the same `ctxpm` classification, migration, compatibility-symlink, `.gitignore`, source-version, update-detection, and `ctxpm.yaml` update rules used by this project.
+Do not install AI resources directly into agent default locations. Before creating, reading, updating, or deleting any AI resource, use the companion `ctxpm` CLI when it is available. If the CLI is unavailable, use the `ctxpm` skill if it is available. Otherwise follow the same `ctxpm` classification, migration, compatibility-symlink, `.gitignore`, source-version, update-detection, and `ctxpm.yaml` update rules used by this project.
 
 Install new external AI resources as `dependency` resources under `.ctxpm/dependencies/`, not as project-local `package` resources, unless the user explicitly confirms they should become project-maintained assets. For GitHub or direct URL resources, record the hash-based `version` in `ctxpm.yaml`.
 
 Install new project-local AI resources as `package` resources under `.ctxpm/packages/` and record them in `ctxpm.yaml`.
 
-Expose the bundled `ctxpm` dependency through this agent's default skill discovery compatibility path or paths so the agent can discover and invoke it through its normal skill or command surface. Subsequent AI resources should be installed and managed through the `ctxpm` skill, which creates and records the required compatibility paths for each declared agent and resource type while keeping canonical content under `.ctxpm/...`.
+Expose the bundled `ctxpm` dependency through this agent's default skill discovery compatibility path or paths so the agent can discover and invoke it through its normal skill or command surface. Subsequent AI resources should be installed and managed through the companion `ctxpm` CLI when it is available, or through the `ctxpm` skill when the CLI is unavailable. Both paths must keep canonical content under `.ctxpm/...` and record the required compatibility paths for each declared agent and resource type.
 <!-- ctxpm:end -->
 ```
 
@@ -434,9 +469,9 @@ If the entrypoint file does not exist, create it.
 If the entrypoint file exists but has no managed block, insert one.  
 If the managed block already exists, update only the managed block and do not overwrite user content outside the block.
 
-### 5.8 Install the Bundled External `ctxpm` Dependency
+### 5.9 Install the Bundled External `ctxpm` Dependency
 
-Install an external helper skill dependency so future AI agents have an explicit workflow for creating, reading, updating, deleting, or reorganizing AI resources after the initial installation.
+Install an external helper skill dependency so future AI agents still have an explicit in-project workflow for creating, reading, updating, deleting, or reorganizing AI resources after the initial installation, even when the companion CLI is unavailable.
 
 Follow the dedicated [`ctxpm` skill specification](docs/ctxpm-skill.md).
 
@@ -444,14 +479,19 @@ At minimum, this step must:
 
 1. Create or update `.ctxpm/dependencies/skills/ctxpm/SKILL.md`.
 2. Copy or write the complete `ctxpm.yaml` format document into the skill directory as `.ctxpm/dependencies/skills/ctxpm/ctxpm-yaml.md`, using the Bear.CTXPM `docs/ctxpm-yaml.md` source specification when it is available.
-3. Immediately create compatibility symlinks in every confirmed agent's default skill discovery directories, such as `.agents/skills/ctxpm`, so each agent can discover the skill from its normal skill or slash-command UI.
-4. Record `ctxpm` in `ctxpm.yaml` as an external `dependency` of type `skill`.
-5. Record both the canonical `.ctxpm/dependencies/...` path and every compatibility symlink path in `ctxpm.yaml`.
-6. Do not omit the `compatibility` field for `ctxpm`.
-7. Record a compatibility path in `ctxpm.yaml` for every confirmed agent's supported skill discovery directory.
-8. Ensure the generated `SKILL.md` contains a compact `ctxpm.yaml` format reference and points to the sibling `ctxpm-yaml.md` companion document.
+3. Create or update the companion CLI directory at `.ctxpm/dependencies/skills/ctxpm/cli/`.
+4. Install or place the project-local companion CLI at `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm`.
+   - If a global `ctxpm` is already available, it may be copied from that global installation.
+   - If `cli/install.sh` is used, prefer `sh cli/install.sh --scope project` so the canonical project-local launcher is created in place.
+   - On Windows-like shell environments, the project-local directory may also include sibling helper launchers such as `ctxpm.exe` and `ctxpm.cmd`, but `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm` remains the canonical launcher path for the protocol-managed installation.
+5. Immediately create compatibility symlinks in every confirmed agent's default skill discovery directories, such as `.agents/skills/ctxpm`, so each agent can discover the skill from its normal skill or slash-command UI.
+6. Record `ctxpm` in `ctxpm.yaml` as an external `dependency` of type `skill`.
+7. Record both the canonical `.ctxpm/dependencies/...` path and every compatibility symlink path in `ctxpm.yaml`.
+8. Do not omit the `compatibility` field for `ctxpm`.
+9. Record a compatibility path in `ctxpm.yaml` for every confirmed agent's supported skill discovery directory.
+10. Ensure the generated `SKILL.md` contains a compact `ctxpm.yaml` format reference and points to the sibling `ctxpm-yaml.md` companion document.
 
-### 5.9 Adjust `.gitignore`
+### 5.10 Adjust `.gitignore`
 
 Check `.gitignore`.
 
@@ -480,7 +520,7 @@ Use this consolidation strategy:
 8. Do not remove the canonical `.ctxpm/packages/` copy from Git when it is a project-local `package`.
 9. Keep external `dependency` content out of Git by ignoring `.ctxpm/dependencies/`.
 
-### 5.10 Report Results
+### 5.11 Report Results
 
 After installation, report:
 
@@ -498,6 +538,7 @@ After installation, report:
 12. Whether the managed entrypoint block now instructs future AI agents to use `ctxpm` rules for AI resource CRUD operations.
 13. Which external dependencies have hash-based versions recorded, and which still require source or entry-file confirmation.
 14. Whether `.ctxpm/dependencies/skills/ctxpm/ctxpm-yaml.md` was created or updated as the `ctxpm` skill companion document.
+15. Whether `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm` was installed or updated as the project-local companion CLI path.
 
 ---
 
@@ -575,12 +616,13 @@ After completion, the project should at least satisfy:
 7. `.gitignore` ignores both `.ctxpm/dependencies/` and `.ctxpm/state/`.
 8. `.ctxpm/dependencies/skills/ctxpm/SKILL.md` exists and is recorded in `ctxpm.yaml`.
 9. `.ctxpm/dependencies/skills/ctxpm/ctxpm-yaml.md` exists as a companion document for the `ctxpm` skill.
-10. Compatibility symlinks for managed resources exist in each confirmed agent's recognizable discovery directories for the corresponding resource types.
-11. The `ctxpm` dependency entry in `ctxpm.yaml` records both the canonical `.ctxpm/dependencies/...` path and every compatibility symlink path.
-12. The managed entrypoint block uses the canonical `ctxpm` template and instructs future AI agents to use `ctxpm` or the same `ctxpm` workflow before creating, reading, updating, or deleting AI resources.
-13. Future AI resources continue to be managed using the same `ctxpm` rules instead of agent default install locations.
-14. External dependencies installed from GitHub or direct URLs record hash-based `version` values in `ctxpm.yaml` for future update detection.
-15. The complete YAML format lives in `.ctxpm/dependencies/skills/ctxpm/ctxpm-yaml.md`.
+10. `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm` exists as the canonical local CLI path for the bundled `ctxpm` skill when the companion CLI was prepared.
+11. Compatibility symlinks for managed resources exist in each confirmed agent's recognizable discovery directories for the corresponding resource types.
+12. The `ctxpm` dependency entry in `ctxpm.yaml` records both the canonical `.ctxpm/dependencies/...` path and every compatibility symlink path.
+13. The managed entrypoint block uses the canonical `ctxpm` template and instructs future AI agents to use `ctxpm` or the same `ctxpm` workflow before creating, reading, updating, or deleting AI resources.
+14. Future AI resources continue to be managed using the same `ctxpm` rules instead of agent default install locations.
+15. External dependencies installed from GitHub or direct URLs record hash-based `version` values in `ctxpm.yaml` for future update detection.
+16. The complete YAML format lives in `.ctxpm/dependencies/skills/ctxpm/ctxpm-yaml.md`.
 
 ---
 

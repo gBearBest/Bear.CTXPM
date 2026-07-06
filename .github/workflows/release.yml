@@ -1,0 +1,197 @@
+name: release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.version.outputs.release_tag }}
+      asset_version: ${{ steps.version.outputs.asset_version }}
+      release_name: ${{ steps.version.outputs.release_name }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+
+      - name: Run tests
+        working-directory: cli
+        run: go test ./...
+
+      - name: Resolve release metadata
+        id: version
+        shell: bash
+        run: |
+          set -eu
+          if [ "${GITHUB_REF_TYPE}" = "branch" ] && [ "${GITHUB_REF_NAME}" = "main" ]; then
+            echo "release_tag=main" >> "$GITHUB_OUTPUT"
+            echo "asset_version=main" >> "$GITHUB_OUTPUT"
+            echo "release_name=main" >> "$GITHUB_OUTPUT"
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            VERSION="${GITHUB_REF_NAME}"
+            echo "release_tag=${VERSION}" >> "$GITHUB_OUTPUT"
+            echo "asset_version=${VERSION#v}" >> "$GITHUB_OUTPUT"
+            echo "release_name=${VERSION}" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: verify
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: darwin
+            goarch: arm64
+            binary_name: ctxpm
+            archive_ext: tar.gz
+          - goos: darwin
+            goarch: amd64
+            binary_name: ctxpm
+            archive_ext: tar.gz
+          - goos: linux
+            goarch: amd64
+            binary_name: ctxpm
+            archive_ext: tar.gz
+          - goos: linux
+            goarch: arm64
+            binary_name: ctxpm
+            archive_ext: tar.gz
+          - goos: windows
+            goarch: amd64
+            binary_name: ctxpm.exe
+            archive_ext: zip
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+
+      - name: Build and package
+        id: package
+        shell: bash
+        run: |
+          set -eu
+          ASSET_VERSION="${{ needs.verify.outputs.asset_version }}"
+          ASSET_PREFIX="ctxpm_${ASSET_VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          STAGING_DIR="$RUNNER_TEMP/staging"
+          OUTPUT_DIR="$RUNNER_TEMP/output"
+          ARCHIVE_PATH=""
+
+          rm -rf "$STAGING_DIR" "$OUTPUT_DIR"
+          mkdir -p "$STAGING_DIR" "$OUTPUT_DIR"
+
+          pushd cli >/dev/null
+          CGO_ENABLED=0 GOOS="${{ matrix.goos }}" GOARCH="${{ matrix.goarch }}" \
+            go build -trimpath -ldflags="-s -w" -o "$STAGING_DIR/${{ matrix.binary_name }}" .
+          popd >/dev/null
+
+          if [ "${{ matrix.archive_ext }}" = "zip" ]; then
+            ARCHIVE_PATH="$OUTPUT_DIR/${ASSET_PREFIX}.zip"
+            (
+              cd "$STAGING_DIR"
+              zip -q "$ARCHIVE_PATH" "${{ matrix.binary_name }}"
+            )
+          else
+            ARCHIVE_PATH="$OUTPUT_DIR/${ASSET_PREFIX}.tar.gz"
+            tar -C "$STAGING_DIR" -czf "$ARCHIVE_PATH" "${{ matrix.binary_name }}"
+          fi
+
+          echo "archive_path=${ARCHIVE_PATH}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload packaged artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: ${{ steps.package.outputs.archive_path }}
+          if-no-files-found: error
+
+  checksums:
+    needs: [verify, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          pattern: release-*
+          merge-multiple: true
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          set -eu
+          cd release-assets
+          find . -maxdepth 1 -type f ! -name "checksums.txt" -print0 \
+            | sort -z \
+            | xargs -0 sha256sum > checksums.txt
+
+      - name: Upload checksum artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-checksums
+          path: release-assets/checksums.txt
+          if-no-files-found: error
+
+  publish:
+    needs: [verify, build, checksums]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Delete previous rolling main release
+        if: github.ref_type == 'branch' && github.ref_name == 'main'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete main --yes --cleanup-tag || true
+
+      - name: Recreate rolling main tag
+        if: github.ref_type == 'branch' && github.ref_name == 'main'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f main "${GITHUB_SHA}"
+          git push --force origin "refs/tags/main"
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          pattern: release-*
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.verify.outputs.release_tag }}
+          name: ${{ needs.verify.outputs.release_name }}
+          prerelease: ${{ needs.verify.outputs.prerelease == 'true' }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          files: |
+            release-assets/*

@@ -12,9 +12,11 @@ Install the canonical resource at:
 .ctxpm/dependencies/skills/ctxpm/
   SKILL.md
   ctxpm-yaml.md
+  cli/
+    ctxpm
 ```
 
-This helper skill itself is an external `dependency`, not a project-local `package`. The `ctxpm-yaml.md` companion document must be copied into the skill directory so the skill remains self-contained when an AI agent only discovers the skill directory.
+This helper skill itself is an external `dependency`, not a project-local `package`. The `ctxpm-yaml.md` companion document must be copied into the skill directory so the skill remains self-contained when an AI agent only discovers the skill directory. When the companion CLI is installed for project-local execution, place it at `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm` inside the same canonical skill directory.
 
 ## Compatibility Symlinks
 
@@ -42,6 +44,7 @@ The entry must include:
 - resource type `skill`
 - dependency semantics
 - the companion `ctxpm-yaml.md` file inside the canonical skill directory
+- the companion CLI binary at `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm` when the CLI is prepared for local project execution
 
 Do not omit `compatibility` for `ctxpm`.
 
@@ -68,23 +71,28 @@ When this skill installs or updates an external AI resource, it must record a ha
 - Do not use branch names, tags, `latest`, filenames, timestamps, or vague release labels as dependency versions.
 - If the source or entry-file hash cannot be confirmed, report the dependency as unresolved for version tracking instead of inventing a value.
 
-## Companion Update Scripts
+## Companion Update CLI
 
-When companion update scripts are available, prefer them over manual AI file edits for dependency update detection and dependency update application.
+When the companion `ctxpm` CLI is available, prefer it over manual AI file edits for dependency update detection and dependency update application.
 
-Reference script paths in the Bear.CTXPM repository:
+Reference CLI paths in the Bear.CTXPM repository:
 
-- `scripts/ctxpm-check-updates`
-- `scripts/ctxpm-apply-updates`
+- `cli/main.go`
+- `cli/Makefile`
+- `cli/install.sh`
 
-These shell-first entry scripts may delegate to a bundled Ruby reference backend when Ruby is available:
+Primary commands:
 
-- `scripts/ctxpm-check-updates.rb`
-- `scripts/ctxpm-apply-updates.rb`
+- `ctxpm check-updates`
+- `ctxpm update`
 
-If the reference backend runtime is unavailable, the shell entry scripts should fail clearly and AI should fall back to the documented manual workflow instead of inventing a silent partial update path.
+Installed project-local CLI path:
 
-These scripts may maintain optional runtime state at `.ctxpm/state/update-checks.json`. That runtime state is not a required installation artifact and must not be treated as canonical protocol metadata.
+- `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm`
+
+If the CLI is unavailable, AI should fall back to the documented manual workflow instead of inventing a silent partial update path.
+
+The CLI may maintain optional runtime state at `.ctxpm/state/update-checks.json`. That runtime state is not a required installation artifact and must not be treated as canonical protocol metadata.
 
 ## Periodic Dependency Update Checks
 
@@ -94,11 +102,11 @@ Rules:
 
 - Read `ctxpm.yaml` and use `update_policy` when it exists.
 - When `update_policy` is missing, default to `enabled: true`, `interval: 1d`, and `include_self: true`.
-- Use the shell-first companion check script when it is available.
+- Use `ctxpm check-updates` when the companion CLI is available.
 - Check `ctxpm` itself unless `update_policy.include_self` is explicitly `false`.
 - If updates are found, ask the user before applying any update.
 - If the user does not answer, leave dependencies unchanged.
-- If the companion scripts or their runtime backend are unavailable, AI may fall back to the documented manual update workflow, but it must keep the same approval-before-apply behavior.
+- If the companion CLI is unavailable, AI may fall back to the documented manual update workflow, but it must keep the same approval-before-apply behavior.
 - When `ctxpm` itself is part of an approved update set, update it last so the currently loaded skill finishes the ongoing operation before the new skill files take effect.
 
 GitHub source example:
@@ -248,8 +256,8 @@ Use this workflow when the project opens after the configured interval has elaps
 
 1. Read `ctxpm.yaml` and load `update_policy`.
 2. Treat `dependencies` as the only periodic update-check targets; do not include project-local `packages`.
-3. Use `scripts/ctxpm-check-updates` when it is available.
-4. Allow the companion script to keep optional runtime state in `.ctxpm/state/update-checks.json`.
+3. Use `ctxpm check-updates` when the companion CLI is available.
+4. Allow the companion CLI to keep optional runtime state in `.ctxpm/state/update-checks.json`.
 5. If the configured interval is not due yet, report the current check state and stop.
 6. If updates are available, ask the user whether to update them.
 7. If the user does not answer, leave all dependencies unchanged.
@@ -262,7 +270,7 @@ Use this workflow when updating existing AI resources.
 1. Read `ctxpm.yaml`.
 2. For project-local `package` resources, update only when the user asks to modify project-maintained content.
 3. For external `dependency` resources, treat `version` as the installed baseline.
-4. Prefer `scripts/ctxpm-apply-updates` when it is available and the user has already approved the dependency set to update.
+4. Prefer `ctxpm update` when the companion CLI is available and the user has already approved the dependency set to update.
 5. For GitHub dependencies, compare the installed commit SHA in `version` with the latest commit SHA from the configured source.
 6. For URL dependencies, compare the installed `sha256:<hex>` version with the SHA-256 hash of the current entry file content.
 7. If unchanged, leave the local resource as-is.
@@ -315,12 +323,13 @@ Use this skill whenever the user asks to create, add, install, list, inspect, ch
 17. When updating external dependencies, compare the recorded `version` with the current upstream hash before changing files.
 18. When deleting resources, confirm the intended removal scope before deleting canonical content.
 19. When maintaining a managed root entrypoint block, keep its body aligned with the canonical Bear.CTXPM `ctxpm` block template. Only the opening `agent=<entrypoint-key>` marker should vary between agent entrypoints.
-20. Prefer shell-first companion update scripts such as `scripts/ctxpm-check-updates` and `scripts/ctxpm-apply-updates` when they are available.
-21. Treat bundled Ruby helpers such as `scripts/ctxpm-check-updates.rb` and `scripts/ctxpm-apply-updates.rb` as a reference backend rather than a guaranteed system dependency.
-22. Treat `.ctxpm/state/update-checks.json` as optional runtime state rather than canonical protocol metadata.
-23. Periodic update checks apply to `dependencies` only and default to once per day when no explicit `update_policy.interval` is configured.
-24. Never apply dependency updates without explicit user approval; if the user does not answer, leave dependencies unchanged.
-25. When approved updates include `ctxpm`, update it last.
+20. Prefer the companion `ctxpm` CLI commands such as `ctxpm check-updates` and `ctxpm update` when the CLI is available.
+21. When the companion CLI is installed as part of this skill, keep its canonical local executable path at `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm`.
+22. Treat the repository CLI implementation under `cli/` as the canonical companion implementation rather than maintaining separate helper scripts.
+23. Treat `.ctxpm/state/update-checks.json` as optional runtime state rather than canonical protocol metadata.
+24. Periodic update checks apply to `dependencies` only and default to once per day when no explicit `update_policy.interval` is configured.
+25. Never apply dependency updates without explicit user approval; if the user does not answer, leave dependencies unchanged.
+26. When approved updates include `ctxpm`, update it last.
 
 ## ctxpm.yaml Format
 
@@ -404,9 +413,10 @@ After installation, verify:
 
 1. `.ctxpm/dependencies/skills/ctxpm/SKILL.md` exists.
 2. `.ctxpm/dependencies/skills/ctxpm/ctxpm-yaml.md` exists as a sibling companion document.
-3. Every confirmed agent's default skill discovery directory contains a compatibility symlink for `ctxpm`, such as `.agents/skills/ctxpm`.
-4. Each compatibility symlink points to `.ctxpm/dependencies/skills/ctxpm`.
-5. `ctxpm.yaml` records the dependency with both canonical `path` and every `compatibility` path.
-6. The generated `SKILL.md` tells AI agents to read the sibling `ctxpm-yaml.md` before modifying `ctxpm.yaml`.
-7. The managed root entrypoint block uses the canonical `ctxpm` template, matches the current entrypoint key in its `agent=...` marker, and instructs future AI agents to use `ctxpm` or the same `ctxpm` workflow before creating, reading, updating, or deleting AI resources.
-8. External dependencies installed from GitHub or direct URLs include hash-based `version` values in `ctxpm.yaml`.
+3. `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm` exists when the companion CLI has been prepared for local project execution.
+4. Every confirmed agent's default skill discovery directory contains a compatibility symlink for `ctxpm`, such as `.agents/skills/ctxpm`.
+5. Each compatibility symlink points to `.ctxpm/dependencies/skills/ctxpm`.
+6. `ctxpm.yaml` records the dependency with both canonical `path` and every `compatibility` path.
+7. The generated `SKILL.md` tells AI agents to read the sibling `ctxpm-yaml.md` before modifying `ctxpm.yaml`.
+8. The managed root entrypoint block uses the canonical `ctxpm` template, matches the current entrypoint key in its `agent=...` marker, and instructs future AI agents to use `ctxpm` or the same `ctxpm` workflow before creating, reading, updating, or deleting AI resources.
+9. External dependencies installed from GitHub or direct URLs include hash-based `version` values in `ctxpm.yaml`.

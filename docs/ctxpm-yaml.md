@@ -108,10 +108,10 @@ Recommended fields:
 | Field | Description |
 | --- | --- |
 | `source` | Upstream source metadata for update detection. |
-| `version` | Hash-based installed version. Required when the resource comes from GitHub or a direct URL. |
+| `version` | Hash-based installed version. Required when the resource comes from Git or a direct URL. |
 | `compatibility` | List of compatibility symlink paths outside `.ctxpm`, normally covering each confirmed agent's recognizable discovery directories for the resource type. |
 
-GitHub dependency example:
+Git dependency example:
 
 ```yaml
 dependencies:
@@ -119,7 +119,7 @@ dependencies:
     type: skill
     path: .ctxpm/dependencies/skills/example-skill
     source:
-      type: github
+      type: git
       url: https://github.com/example/example-ai-resources
       path: skills/example-skill
     version: 0123456789abcdef0123456789abcdef01234567
@@ -134,15 +134,17 @@ Rules:
 - `source.path` is the path to the resource inside the upstream repository.
 - If a specific branch, tag, or ref must be used for update checks, record it as `source.ref`.
 
-Optional GitHub ref example:
+Optional Git ref example:
 
 ```yaml
 source:
-  type: github
+  type: git
   url: https://github.com/example/example-ai-resources
   ref: main
   path: skills/example-skill
 ```
+
+Legacy manifests that still use `source.type: github` remain valid and should be interpreted the same way as `source.type: git`.
 
 Direct URL dependency example:
 
