@@ -26,7 +26,7 @@ Bear.CTXPM 的目标是提供一套 AI 可以直接理解和执行的统一约�
 > 如果你还希望在 AI 工作流之外，手动检查或管理 Bear.CTXPM 资源，可以将配套的 `ctxpm` CLI 全局安装到当前用户环境中：
 >
 > ```sh
-> curl -fsSL https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/main/cli/install.sh | sh -s -- --scope global --version main
+> curl -fsSL https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/main/cli/install.sh | sh -s -- --scope global --version latest
 > ```
 >
 > 这一步是可选的。即使没有预先安装全局 CLI，AI agent 仍然可以按照 `INSTALL.md` 完成协议初始化与管理流程。

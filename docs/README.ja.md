@@ -26,7 +26,7 @@ https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/main/INSTALL.md の説明
 > AI 主導のワークフロー以外でも Bear.CTXPM リソースを手動で確認または管理したい場合は、付属の `ctxpm` CLI をグローバルにインストールできます。
 >
 > ```sh
-> curl -fsSL https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/main/cli/install.sh | sh -s -- --scope global --version main
+> curl -fsSL https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/main/cli/install.sh | sh -s -- --scope global --version latest
 > ```
 >
 > これは任意です。グローバル CLI を事前にインストールしていなくても、AI agent は `INSTALL.md` に従ってセットアップと管理を進められます。

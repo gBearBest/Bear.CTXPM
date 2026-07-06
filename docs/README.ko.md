@@ -26,7 +26,7 @@ https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/main/INSTALL.md 문서의
 > AI 중심 워크플로 밖에서도 Bear.CTXPM 리소스를 직접 확인하거나 관리하고 싶다면, 보조 `ctxpm` CLI를 사용자 환경에 전역 설치할 수 있습니다.
 >
 > ```sh
-> curl -fsSL https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/main/cli/install.sh | sh -s -- --scope global --version main
+> curl -fsSL https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/main/cli/install.sh | sh -s -- --scope global --version latest
 > ```
 >
 > 이 단계는 선택 사항입니다. 전역 CLI가 미리 설치되어 있지 않아도 AI agent는 `INSTALL.md`에 따라 설치와 관리 흐름을 계속 진행할 수 있습니다.

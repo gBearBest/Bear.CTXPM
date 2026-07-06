@@ -9,7 +9,7 @@ INSTALL_SCOPE="global"
 PROJECT_ROOT="."
 INSTALL_DIR="${HOME}/.local/bin"
 BIN_NAME="ctxpm"
-VERSION="main"
+VERSION="latest"
 USER_SET_BIN_NAME="false"
 
 usage() {
@@ -17,7 +17,7 @@ usage() {
 Usage: install.sh [options]
 
 Options:
-  --version <version>      Optional. Install main, latest, or a specific version such as v0.1.0 (default: main)
+  --version <version>      Optional. Install latest or a specific version such as v0.1.0 (default: latest)
   --scope <global|project> Install as a global command or into a project's .ctxpm skill directory (default: global)
   --project-root <path>    Optional. Project root used when --scope project (default: current directory)
   --install-dir <path>     Install directory (default: ~/.local/bin)
@@ -107,15 +107,18 @@ detect_arch() {
 }
 
 resolve_version() {
-  if [ "$VERSION" = "main" ]; then
-    echo "main"
-    return
-  fi
-
-  if [ "$VERSION" != "latest" ]; then
-    echo "$VERSION"
-    return
-  fi
+  case "$VERSION" in
+    latest)
+      ;;
+    main)
+      echo "The main release selector has been removed. Use --version latest or a semantic version tag such as v0.1.0." >&2
+      exit 1
+      ;;
+    *)
+      echo "$VERSION"
+      return
+      ;;
+  esac
 
   if [ -n "$LATEST_TAG_OVERRIDE" ]; then
     echo "$LATEST_TAG_OVERRIDE"
@@ -132,7 +135,6 @@ resolve_version() {
 
 resolve_asset_version() {
   case "$1" in
-    main) echo "main" ;;
     v*) echo "${1#v}" ;;
     *) echo "$1" ;;
   esac

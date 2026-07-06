@@ -192,13 +192,16 @@ Recommended order:
 4. If a global `ctxpm` command is already available in the environment, it may be used as the source binary, but the project installation should still place a copy or equivalent local executable at `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm`.
 5. If the local repository contains the CLI source under `cli/`, prefer building from source and placing the resulting binary at `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm`.
 6. If source build is not practical and the Bear.CTXPM repository contains `cli/install.sh`, use that installer in project mode so the CLI lands directly in the canonical project-local path.
-   - During the current pre-release phase, prefer the rolling `main` channel unless the user explicitly asked for a stable tagged version.
+   - Stable CLI releases use semantic version tags such as `v0.1.0`.
+   - Prefer the default `latest` channel unless the user explicitly asks to pin a specific tagged version.
    - Minimal project-local install: `sh cli/install.sh --scope project`
-   - Optional explicit form: `sh cli/install.sh --scope project --project-root . --version main`
+   - Optional explicit latest form: `sh cli/install.sh --scope project --project-root . --version latest`
+   - Optional pinned version form: `sh cli/install.sh --scope project --project-root . --version v0.1.0`
    - On Windows-like shell environments, project mode should still preserve the canonical launcher path `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm`, while also placing sibling helper launchers such as `ctxpm.exe` and `ctxpm.cmd` in the same directory when needed.
 7. The same installer may also be used independently for a global shell-wide install when the user wants a global `ctxpm` command.
    - Minimal global install: `sh cli/install.sh --scope global`
-   - Optional explicit form: `sh cli/install.sh --scope global --version main`
+   - Optional explicit latest form: `sh cli/install.sh --scope global --version latest`
+   - Optional pinned version form: `sh cli/install.sh --scope global --version v0.1.0`
 8. After installation, copy, or build, verify that `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm --help` succeeds.
 9. If CLI setup fails, do not stop the protocol installation. Continue with the manual workflow, but report clearly that the companion CLI could not be prepared.
 
