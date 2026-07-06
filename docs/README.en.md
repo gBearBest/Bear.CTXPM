@@ -1,5 +1,7 @@
 # Bear.CTXPM Project Introduction
 
+![Bear.CTXPM social preview](assets/social-preview.en.svg)
+
 [`en` English](README.en.md) | [`ja` 日本語](README.ja.md) | [`ko` 한국어](README.ko.md) | [`zh-CN` 简体中文](README.zh-CN.md)
 
 Bear.CTXPM is a fully open-source protocol for managing AI resources. It uses unified `dependency` / `package` semantics to manage both external and internal AI resources in a project. Through documentation conventions, directory structure, and agent root entrypoint document bridging, AI agents can directly understand, discover, and use these resources inside a project.

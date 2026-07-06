@@ -1,5 +1,7 @@
 # Bear.CTXPM プロジェクト紹介
 
+![Bear.CTXPM ソーシャルプレビュー](assets/social-preview.ja.svg)
+
 [`en` English](README.en.md) | [`ja` 日本語](README.ja.md) | [`ko` 한국어](README.ko.md) | [`zh-CN` 简体中文](README.zh-CN.md)
 
 Bear.CTXPM は、AI リソースを管理するための完全なオープンソースプロトコルです。統一された `dependency` / `package` セマンティクスを使って、プロジェクト内の外部および内部 AI リソースを管理します。また、ドキュメント規約、ディレクトリ構造、agent のルートエントリーポイント文書をつなぐ仕組みにより、AI がプロジェクト内でこれらのリソースを直接理解、発見、利用できるようにします。

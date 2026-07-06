@@ -1,5 +1,7 @@
 # Bear.CTXPM 项目介绍
 
+![Bear.CTXPM 社交预览图](assets/social-preview.zh-CN.svg)
+
 [`en` English](README.en.md) | [`ja` 日本語](README.ja.md) | [`ko` 한국어](README.ko.md) | [`zh-CN` 简体中文](README.zh-CN.md)
 
 Bear.CTXPM 是一个完全开源的 AI 资源管理协议。它用统一的 `dependency` / `package` 语义管理项目中的外部与内部 AI 资源，并通过文档约定、目录结构和 agent 根入口文档桥接机制，让 AI 可以直接在项目中理解、发现和使用这些资源。
