@@ -24,7 +24,12 @@ dependencies:
     compatibility:
       - .agents/skills/ctxpm
 
-packages: []
+packages:
+  - name: ctxpm-release
+    type: skill
+    path: .ctxpm/packages/skills/ctxpm-release
+    compatibility:
+      - .agents/skills/ctxpm-release
 
 entrypoints:
   generic:
