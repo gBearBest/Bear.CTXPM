@@ -1,0 +1,32 @@
+version: 1
+
+project:
+  name: gBear.CTXPM
+
+agents:
+  - generic
+
+update_policy:
+  enabled: true
+  interval: 1d
+  include_self: true
+
+dependencies:
+  - name: ctxpm
+    type: skill
+    path: .ctxpm/dependencies/skills/ctxpm
+    source:
+      type: git
+      url: https://github.com/gBearBest/Bear.CTXPM
+      ref: develop
+      path: docs/ctxpm-skill.md
+    version: c502ab4ecd5d3583913e5157189cda753d1b11ef
+    compatibility:
+      - .agents/skills/ctxpm
+
+packages: []
+
+entrypoints:
+  generic:
+    file: AGENTS.md
+    mode: managed

@@ -8,3 +8,7 @@
 !/docs/README.zh-CN.md
 !/docs/assets/
 !/docs/assets/social-preview*.svg
+
+.ctxpm/dependencies/
+.ctxpm/state/
+.agents/skills/
