@@ -873,6 +873,11 @@ func (a *App) Update(ctx context.Context, opts UpdateOptions) (*UpdateResult, er
 			return nil, err
 		}
 	}
+	if !opts.DryRun {
+		if _, err := a.Install(ctx, InstallOptions{}); err != nil {
+			return nil, err
+		}
+	}
 	return result, nil
 }
 

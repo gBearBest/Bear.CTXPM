@@ -375,7 +375,7 @@ func printHelp(w *os.File) {
 		"  list           List dependencies and packages",
 		"  validate       Validate ctxpm.yaml and local paths",
 		"  check-updates  Check whether dependencies have upstream updates",
-		"  update         Apply dependency updates and rewrite manifest versions",
+		"  update         Apply dependency updates, rewrite manifest versions, and install resources",
 		"  remove         Remove a dependency or package",
 		"",
 		"Examples:",
