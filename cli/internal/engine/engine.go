@@ -28,6 +28,17 @@ func New(root string) *App {
 	return &App{Root: root}
 }
 
+func ensureManifestVersion(root string, allowMissing bool) error {
+	_, err := manifest.SyncVersion(root)
+	if err == nil {
+		return nil
+	}
+	if allowMissing && errors.Is(err, manifest.ErrNotFound) {
+		return nil
+	}
+	return err
+}
+
 type textResult interface {
 	Text() string
 }
@@ -123,6 +134,9 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 		projectName = filepath.Base(a.Root)
 	}
 
+	if err := ensureManifestVersion(a.Root, true); err != nil {
+		return nil, err
+	}
 	m, manifestPath, err := manifest.Load(a.Root)
 	switch {
 	case err == nil:
@@ -135,7 +149,7 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 	opts.Agent = discovery.agent
 	if m == nil {
 		m = &manifest.Manifest{
-			Version:      manifest.ManifestVersion2,
+			Version:      manifest.CurrentManifestVersion,
 			Project:      manifest.Project{Name: projectName},
 			Agents:       []string{opts.Agent},
 			UpdatePolicy: manifest.DefaultPolicy(),
@@ -150,8 +164,8 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 		}
 	}
 
-	if m.Version != manifest.ManifestVersion2 {
-		m.Version = manifest.ManifestVersion2
+	if m.Version != manifest.CurrentManifestVersion {
+		m.Version = manifest.CurrentManifestVersion
 	}
 	if strings.TrimSpace(m.Project.Name) == "" || opts.Force {
 		m.Project.Name = projectName
@@ -303,6 +317,9 @@ func (r AddResult) Text() string {
 }
 
 func (a *App) Add(ctx context.Context, opts AddOptions) (*AddResult, error) {
+	if err := ensureManifestVersion(a.Root, false); err != nil {
+		return nil, err
+	}
 	m, manifestPath, err := manifest.Load(a.Root)
 	if err != nil {
 		return nil, err
@@ -516,6 +533,9 @@ func (r InstallResult) Text() string {
 }
 
 func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult, error) {
+	if err := ensureManifestVersion(a.Root, false); err != nil {
+		return nil, err
+	}
 	m, _, err := manifest.Load(a.Root)
 	if err != nil {
 		return nil, err
@@ -791,6 +811,9 @@ func (r UpdateResult) Text() string {
 }
 
 func (a *App) Update(ctx context.Context, opts UpdateOptions) (*UpdateResult, error) {
+	if err := ensureManifestVersion(a.Root, false); err != nil {
+		return nil, err
+	}
 	m, _, err := manifest.Load(a.Root)
 	if err != nil {
 		return nil, err
@@ -897,6 +920,9 @@ func (r RemoveResult) Text() string {
 }
 
 func (a *App) Remove(opts RemoveOptions) (*RemoveResult, error) {
+	if err := ensureManifestVersion(a.Root, false); err != nil {
+		return nil, err
+	}
 	m, _, err := manifest.Load(a.Root)
 	if err != nil {
 		return nil, err
