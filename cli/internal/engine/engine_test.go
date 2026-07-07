@@ -86,6 +86,12 @@ func TestInitCreatesV2Manifest(t *testing.T) {
 	if got := readFileForTest(t, filepath.Join(root, "AGENTS.md")); got != manifest.ManagedEntrypoint("generic") {
 		t.Fatalf("AGENTS.md mismatch\n--- got ---\n%s\n--- want ---\n%s", got, manifest.ManagedEntrypoint("generic"))
 	}
+	if got := readFileForTest(t, filepath.Join(root, ".ctxpm/dependencies/skills/ctxpm/SKILL.md")); got != readRepoFileForTest(t, "../../../resources/skills/ctxpm/SKILL.md") {
+		t.Fatalf("installed ctxpm skill mismatch with resources/skills/ctxpm/SKILL.md")
+	}
+	if got := readFileForTest(t, filepath.Join(root, ".ctxpm/dependencies/skills/ctxpm/ctxpm-yaml.md")); got != readRepoFileForTest(t, "../../../resources/skills/ctxpm/ctxpm-yaml.md") {
+		t.Fatalf("installed ctxpm-yaml mismatch with resources/skills/ctxpm/ctxpm-yaml.md")
+	}
 	for _, relative := range []string{
 		".ctxpm/dependencies/skills/ctxpm/SKILL.md",
 		".ctxpm/dependencies/skills/ctxpm/ctxpm-yaml.md",
@@ -101,6 +107,17 @@ func TestInitCreatesV2Manifest(t *testing.T) {
 	}
 	if target != "../../.ctxpm/dependencies/skills/ctxpm" {
 		t.Fatalf("compat symlink = %q", target)
+	}
+}
+
+func TestBundledCtxpmAssetsStayInSyncWithResources(t *testing.T) {
+	skillResource := readRepoFileForTest(t, "../../../resources/skills/ctxpm/SKILL.md")
+	yamlResource := readRepoFileForTest(t, "../../../resources/skills/ctxpm/ctxpm-yaml.md")
+	if bundledCtxpmSkillContent != skillResource {
+		t.Fatalf("generated bundled ctxpm skill does not match resources/skills/ctxpm/SKILL.md")
+	}
+	if bundledCtxpmYAMLContent != yamlResource {
+		t.Fatalf("generated bundled ctxpm yaml does not match resources/skills/ctxpm/ctxpm-yaml.md")
 	}
 }
 
@@ -356,6 +373,15 @@ func readFileForTest(t *testing.T, path string) string {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("ReadFile(%s) error = %v", path, err)
+	}
+	return string(data)
+}
+
+func readRepoFileForTest(t *testing.T, relative string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Clean(relative))
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", relative, err)
 	}
 	return string(data)
 }

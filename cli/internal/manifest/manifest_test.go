@@ -101,7 +101,7 @@ func TestUpdateResourceVersionsNoChangeLeavesManifestUntouched(t *testing.T) {
 		"    source:\n" +
 		"      type: git\n" +
 		"      url: https://example.com/repo.git\n" +
-		"      path: docs/ctxpm-skill.md\n" +
+		"      path: resources/skills/ctxpm\n" +
 		"    version: abc123 # pinned\n" +
 		"\n" +
 		"packages: []\n"
@@ -137,7 +137,7 @@ func TestUpdateResourceVersionsReplacesOnlyVersionValue(t *testing.T) {
 		"    source:\n" +
 		"      type: git\n" +
 		"      url: https://example.com/repo.git\n" +
-		"      path: docs/ctxpm-skill.md\n" +
+		"      path: resources/skills/ctxpm\n" +
 		"    version: abc123 # pinned\n" +
 		"    compatibility:\n" +
 		"      - .agents/skills/ctxpm\n" +
@@ -157,7 +157,7 @@ func TestUpdateResourceVersionsReplacesOnlyVersionValue(t *testing.T) {
 		"    source:\n" +
 		"      type: git\n" +
 		"      url: https://example.com/repo.git\n" +
-		"      path: docs/ctxpm-skill.md\n" +
+		"      path: resources/skills/ctxpm\n" +
 		"    version: def456 # pinned\n" +
 		"    compatibility:\n" +
 		"      - .agents/skills/ctxpm\n" +
@@ -192,7 +192,7 @@ func TestUpdateResourceVersionsInsertsMissingVersionBeforeCompatibility(t *testi
 		"    source:\n" +
 		"      type: git\n" +
 		"      url: https://example.com/repo.git\n" +
-		"      path: docs/ctxpm-skill.md\n" +
+		"      path: resources/skills/ctxpm\n" +
 		"    compatibility:\n" +
 		"      - .agents/skills/ctxpm\n" +
 		"packages: []\n"
@@ -207,7 +207,7 @@ func TestUpdateResourceVersionsInsertsMissingVersionBeforeCompatibility(t *testi
 		"    source:\n" +
 		"      type: git\n" +
 		"      url: https://example.com/repo.git\n" +
-		"      path: docs/ctxpm-skill.md\n" +
+		"      path: resources/skills/ctxpm\n" +
 		"    version: def456\n" +
 		"    compatibility:\n" +
 		"      - .agents/skills/ctxpm\n" +

@@ -1,59 +1,158 @@
 # ctxpm
 
-Read `ctxpm-yaml.md` in this directory before editing `ctxpm.yaml`.
+`ctxpm` is the bundled Bear.CTXPM management skill. It gives future AI agents one explicit workflow for creating, installing, validating, updating, and removing AI resources in a project.
 
-## Purpose
+## Canonical Resource Root
 
-`ctxpm` manages the AI resource lifecycle for a Bear.CTXPM project:
+Treat the bundled `ctxpm` skill as a **directory resource root**, not a single Markdown file.
 
-- install
-- add
-- list
-- validate
-- check-updates
-- update
-- remove
+Canonical install root:
 
-## Resource Model
+```text
+.ctxpm/dependencies/skills/ctxpm/
+  SKILL.md
+  ctxpm-yaml.md
+  cli/
+    ctxpm
+```
 
-Treat each managed resource as:
+Rules:
 
-1. a **resource root**
-2. an **entry file**
-3. an optional **upstream source**
+- The resource root is `.ctxpm/dependencies/skills/ctxpm/`.
+- The entry file is `SKILL.md`.
+- `ctxpm-yaml.md` must live beside the entry file so the skill remains self-contained.
+- When the companion CLI is prepared for project-local use, place it at `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm`.
 
-The canonical root lives under `.ctxpm/packages/` or `.ctxpm/dependencies/`. Compatibility paths only expose that root to agent-specific discovery directories.
+## Compatibility Exposure
 
-## Dependency Version Rules
+After installing the canonical root, immediately expose it through every confirmed agent's default skill discovery directory.
+
+Example:
+
+```text
+.agents/skills/ctxpm -> ../../.ctxpm/dependencies/skills/ctxpm
+```
+
+Apply the same compatibility rule to other managed resources: keep the canonical content under `.ctxpm/...`, then expose it through agent-recognizable discovery paths.
+
+## `ctxpm.yaml` Registration
+
+Record `ctxpm` as an external `dependency` of type `skill`.
+
+Recommended v2 entry:
+
+```yaml
+dependencies:
+  - name: ctxpm
+    type: skill
+    layout: dir
+    path: .ctxpm/dependencies/skills/ctxpm
+    entry: SKILL.md
+    source:
+      type: git
+      url: https://github.com/gBearBest/Bear.CTXPM
+      path: resources/skills/ctxpm
+      entry: SKILL.md
+      ref: main
+    version: 0123456789abcdef0123456789abcdef01234567
+    compatibility:
+      - .agents/skills/ctxpm
+```
+
+Rules:
+
+- Do not model the bundled `ctxpm` skill as a single-file URL dependency.
+- Register the full skill directory as the resource root.
+- Do not omit `compatibility` for `ctxpm`.
+
+## Version Rules
+
+External dependency versions must describe the resolved resource root:
 
 - Git resources use the installed commit SHA.
 - Single-file non-Git resources use `sha256:<hex>`.
 - Directory non-Git resources use `sha256tree:<hex>`.
 
-Always version the whole resolved resource root, not only one guessed companion file.
+For multi-file URL or archive resources, compute the version from the full directory tree, not only from the entry file.
 
-## Installation Rules
+## Preferred CLI Workflow
 
-1. Materialize the resource root from its source.
-2. Validate that the result matches `layout`.
-3. Validate that `entry` exists inside the root.
-4. Install or replace the canonical root.
-5. Repair compatibility links.
-6. Only rewrite `ctxpm.yaml` when a recorded dependency version actually changed.
+When the companion CLI is available, prefer it for routine lifecycle operations:
 
-## Bundled `ctxpm` Registration
+- `ctxpm install`
+- `ctxpm add`
+- `ctxpm list`
+- `ctxpm validate`
+- `ctxpm check-updates`
+- `ctxpm update`
+- `ctxpm remove`
 
-The bundled `ctxpm` skill should itself be modeled as a directory dependency:
+If the CLI is unavailable, follow the same protocol manually instead of inventing a partial workflow.
+
+## Compact `ctxpm.yaml` Reference
+
+The complete schema is defined in [`ctxpm-yaml.md`](ctxpm-yaml.md). `SKILL.md` should tell agents to read that sibling file before editing `ctxpm.yaml`.
+
+Compact v2 example:
 
 ```yaml
-- name: ctxpm
-  type: skill
-  layout: dir
-  path: .ctxpm/dependencies/skills/ctxpm
-  entry: SKILL.md
-  source:
-    type: git
-    url: https://github.com/gBearBest/Bear.CTXPM
-    path: resources/skills/ctxpm
+version: 2
+
+project:
+  name: your-project-name
+
+agents:
+  - codex
+
+dependencies:
+  - name: external-resource
+    type: skill
+    layout: dir
+    path: .ctxpm/dependencies/skills/external-resource
     entry: SKILL.md
+    source:
+      type: git
+      url: https://github.com/example/example-ai-resources
+      path: skills/external-resource
+      entry: SKILL.md
+    version: 0123456789abcdef0123456789abcdef01234567
+    compatibility:
+      - .agents/skills/external-resource
+
+packages:
+  - name: project-resource
+    type: rule
+    layout: file
+    path: .ctxpm/packages/rules/project-resource.md
+    entry: project-resource.md
+
+entrypoints:
+  codex:
+    file: AGENTS.md
+    mode: managed
 ```
+
+## Lifecycle Rules
+
+### Create / Install
+
+1. Classify the resource as `dependency` or `package`.
+2. Install the canonical resource root under `.ctxpm/dependencies/` or `.ctxpm/packages/`.
+3. Record `layout`, `path`, and `entry`.
+4. For dependencies, record `source` and `version`.
+5. Repair compatibility exposure paths.
+
+### Validate
+
+1. Check that the resource root exists.
+2. Check that the shape matches `layout`.
+3. Check that the declared `entry` exists inside the root.
+4. Check that compatibility links exist.
+
+### Update
+
+1. Resolve the upstream resource root.
+2. Recompute the root version.
+3. Replace the canonical root.
+4. Repair compatibility links.
+5. Only update `ctxpm.yaml` when the dependency version actually changed.

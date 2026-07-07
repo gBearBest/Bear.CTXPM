@@ -369,7 +369,7 @@ Follow these rules:
 - `entrypoints` records the entrypoint file for the current agent with `mode: managed`.
 - External dependencies installed from GitHub or direct URLs record a hash-based `version`.
 
-For the complete field-level format, follow the Bear.CTXPM source specification at [`docs/ctxpm-yaml.md`](docs/ctxpm-yaml.md) when it is available. When changing `ctxpm.yaml`, preserve unknown fields and unrelated entries unless they directly conflict with the requested change.
+For the complete field-level format, follow the Bear.CTXPM source specification at [`resources/skills/ctxpm/ctxpm-yaml.md`](resources/skills/ctxpm/ctxpm-yaml.md) when it is available. When changing `ctxpm.yaml`, preserve unknown fields and unrelated entries unless they directly conflict with the requested change.
 
 Install the complete format document as the `ctxpm` skill companion file at `.ctxpm/dependencies/skills/ctxpm/ctxpm-yaml.md`.
 
@@ -502,12 +502,12 @@ If the managed block already exists, update only the managed block and do not ov
 
 Install an external helper skill dependency so future AI agents still have an explicit in-project workflow for creating, reading, updating, deleting, or reorganizing AI resources after the initial installation, even when the companion CLI is unavailable.
 
-Follow the dedicated [`ctxpm` skill specification](docs/ctxpm-skill.md).
+Follow the dedicated [`ctxpm` skill specification](resources/skills/ctxpm/SKILL.md).
 
 At minimum, this step must:
 
 1. Create or update `.ctxpm/dependencies/skills/ctxpm/SKILL.md`.
-2. Copy or write the complete `ctxpm.yaml` format document into the skill directory as `.ctxpm/dependencies/skills/ctxpm/ctxpm-yaml.md`, using the Bear.CTXPM `docs/ctxpm-yaml.md` source specification when it is available.
+2. Copy or write the complete `ctxpm.yaml` format document into the skill directory as `.ctxpm/dependencies/skills/ctxpm/ctxpm-yaml.md`, using the Bear.CTXPM `resources/skills/ctxpm/ctxpm-yaml.md` source specification when it is available.
 3. Create or update the companion CLI directory at `.ctxpm/dependencies/skills/ctxpm/cli/`.
 4. Install or place the project-local companion CLI at `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm`.
    - If a global `ctxpm` is already available, it may be copied from that global installation.
