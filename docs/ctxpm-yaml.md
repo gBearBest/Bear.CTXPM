@@ -7,7 +7,7 @@ AI agents must read this format before creating, editing, auditing, or deleting 
 ## Top-Level Structure
 
 ```yaml
-version: 1
+version: 2
 
 project:
   name: your-project-name
@@ -34,42 +34,31 @@ entrypoints:
 
 | Field | Required | Description |
 | --- | --- | --- |
-| `version` | Yes | Format version. Must be `1` for Bear.CTXPM v0.1. |
-| `project.name` | Yes | Project name. Use the repository or root directory name when no explicit project name exists. |
-| `agents` | Yes | List of confirmed agent profiles used by the project. |
-| `update_policy` | No | Policy for periodic dependency update detection. |
-| `dependencies` | Yes | External AI resources managed under `.ctxpm/dependencies/`. Use an empty list when none exist. |
-| `packages` | Yes | Project-local AI resources managed under `.ctxpm/packages/`. Use an empty list when none exist. |
+| `version` | Yes | Format version. Use `2`. |
+| `project.name` | Yes | Project name. |
+| `agents` | Yes | Confirmed agent profiles used by the project. |
+| `update_policy` | No | Policy for dependency update checks. |
+| `dependencies` | Yes | External AI resources managed under `.ctxpm/dependencies/`. |
+| `packages` | Yes | Project-local AI resources managed under `.ctxpm/packages/`. |
 | `entrypoints` | Yes | Root Markdown entrypoint files managed for each agent. |
 
-## `update_policy`
+## Core Concepts
 
-`update_policy` configures periodic dependency update detection.
+### Resource Root
 
-Example:
+The unit of install, update, validate, versioning, and compatibility is the **resource root**.
 
-```yaml
-update_policy:
-  enabled: true
-  interval: 1d
-  include_self: true
-```
+- A resource root can be a single file or a directory.
+- `path` always points to the canonical local resource root.
+- Compatibility paths must point to the same root.
 
-Fields:
+### Entry File
 
-| Field | Description |
-| --- | --- |
-| `enabled` | Whether periodic dependency update checks are enabled. Defaults to `true` when omitted. |
-| `interval` | Check cadence using forms like `12h`, `1d`, or `7d`. Defaults to `1d` when omitted. |
-| `include_self` | Whether the bundled `ctxpm` dependency participates in periodic checks and update prompts. Defaults to `true` when omitted. |
+The **entry file** is the file an AI agent should read first inside the resource root.
 
-Rules:
-
-- `update_policy` applies to `dependencies` only, not to project-local `packages`.
-- `update_policy` controls detection cadence, not automatic update permission.
-- AI must still ask the user before applying any dependency update.
-- If the user does not answer an update prompt, leave dependencies unchanged.
-- Companion update scripts may store runtime check state under `.ctxpm/state/update-checks.json`, but that runtime state does not belong in `ctxpm.yaml`.
+- For `layout: dir`, `entry` is required and is relative to the resource root.
+- For `layout: file`, `entry` should match the file name.
+- `source.entry` describes the upstream entry file inside the upstream source root.
 
 ## Resource Types
 
@@ -91,121 +80,184 @@ Use these directory mappings:
 | `prompt` | `.ctxpm/packages/prompts/` | `.ctxpm/dependencies/prompts/` |
 | `mcp` | `.ctxpm/packages/mcp/` | `.ctxpm/dependencies/mcp/` |
 
-## `dependencies` Entries
+## Shared Resource Fields
 
-Each `dependencies` entry describes an external AI resource.
+Every `dependencies` or `packages` item uses the same root-level shape:
 
-Required fields:
+| Field | Required | Description |
+| --- | --- | --- |
+| `name` | Yes | Stable resource name. |
+| `type` | Yes | Resource type. |
+| `layout` | Yes | `file` or `dir`. |
+| `path` | Yes | Canonical local resource root under `.ctxpm/dependencies/` or `.ctxpm/packages/`. |
+| `entry` | Yes | Entry file relative to the canonical root. |
+| `compatibility` | No | Compatibility exposure paths outside `.ctxpm`. |
+| `source` | Dependencies only | Upstream source metadata. |
+| `version` | Dependencies only | Installed dependency version. |
 
-| Field | Description |
-| --- | --- |
-| `name` | Stable resource name. |
-| `type` | Resource type. Must use one of the allowed resource types. |
-| `path` | Canonical local path under `.ctxpm/dependencies/`. |
+Rules:
 
-Recommended fields:
+- `layout: file` means `path` points to a file resource root.
+- `layout: dir` means `path` points to a directory resource root.
+- For `layout: file`, `entry` should match the file name in `path`.
+- For `layout: dir`, `entry` must exist inside the directory root.
 
-| Field | Description |
-| --- | --- |
-| `source` | Upstream source metadata for update detection. |
-| `version` | Hash-based installed version. Required when the resource comes from Git or a direct URL. |
-| `compatibility` | List of compatibility symlink paths outside `.ctxpm`, normally covering each confirmed agent's recognizable discovery directories for the resource type. |
+## Dependency Sources
 
-Git dependency example:
+`source.type` supports:
+
+- `git`
+- `url`
+- `archive`
+
+Legacy `source.type: github` may be treated as `git` during transition, but new manifests should write `git`.
+
+### Git Source
+
+Use Git for single-file or directory resources stored in a repository.
 
 ```yaml
 dependencies:
-  - name: example-skill
+  - name: reviewer
     type: skill
-    path: .ctxpm/dependencies/skills/example-skill
+    layout: dir
+    path: .ctxpm/dependencies/skills/reviewer
+    entry: SKILL.md
     source:
       type: git
-      url: https://github.com/example/example-ai-resources
-      path: skills/example-skill
+      url: https://github.com/example/ai-resources
+      ref: main
+      path: skills/reviewer
+      entry: SKILL.md
     version: 0123456789abcdef0123456789abcdef01234567
     compatibility:
-      - .agents/skills/example-skill
+      - .agents/skills/reviewer
 ```
 
 Rules:
 
-- `version` is the installed commit SHA.
-- Do not duplicate the same commit SHA under `source.commit`.
-- `source.path` is the path to the resource inside the upstream repository.
-- If a specific branch, tag, or ref must be used for update checks, record it as `source.ref`.
+- `source.path` is the upstream resource root inside the repository.
+- `source.entry` is the upstream entry file relative to `source.path`.
+- `version` is the installed commit SHA for the resource root.
 
-Optional Git ref example:
-
-```yaml
-source:
-  type: git
-  url: https://github.com/example/example-ai-resources
-  ref: main
-  path: skills/example-skill
-```
-
-Legacy manifests that still use `source.type: github` remain valid and should be interpreted the same way as `source.type: git`.
-
-Direct URL dependency example:
+### Single-File URL Source
 
 ```yaml
 dependencies:
-  - name: example-rule
+  - name: release-rule
     type: rule
-    path: .ctxpm/dependencies/rules/example-rule.md
+    layout: file
+    path: .ctxpm/dependencies/rules/release-rule.md
+    entry: release-rule.md
     source:
       type: url
-      url: https://example.com/ai/rules/example-rule.md
-      entry: example-rule.md
+      url: https://example.com/ai/rules/release-rule.md
+      entry: release-rule.md
     version: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 ```
 
 Rules:
 
-- `source.url` is the URL used to fetch the resource or entry file.
-- `source.entry` is the AI resource entry file used for hashing and reading.
-- `version` must be the SHA-256 hash of the entry file content in the format `sha256:<hex>`.
-- If there is no single clear entry file, ask the user to choose one before recording `version`.
+- When `source.files` is omitted, the URL source is a single-file resource.
+- Single-file URL sources must use `layout: file`.
+- `version` must use `sha256:<hex>`.
 
-## `packages` Entries
-
-Each `packages` entry describes a project-local AI resource.
-
-Required fields:
-
-| Field | Description |
-| --- | --- |
-| `name` | Stable resource name. |
-| `type` | Resource type. Must use one of the allowed resource types. |
-| `path` | Canonical local path under `.ctxpm/packages/`. |
-
-Optional fields:
-
-| Field | Description |
-| --- | --- |
-| `compatibility` | List of compatibility symlink paths outside `.ctxpm`, normally covering each confirmed agent's recognizable discovery directories for the resource type. |
-
-Example:
+### Multi-File URL Source
 
 ```yaml
-packages:
-  - name: project-rules
-    type: rule
-    path: .ctxpm/packages/rules/project-rules
-    compatibility:
-      - rules/project-rules
+dependencies:
+  - name: reviewer
+    type: skill
+    layout: dir
+    path: .ctxpm/dependencies/skills/reviewer
+    entry: SKILL.md
+    source:
+      type: url
+      url: https://example.com/ai/reviewer/
+      files:
+        - SKILL.md
+        - prompts/release.md
+        - rules/review.md
+      entry: SKILL.md
+    version: sha256tree:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789
 ```
 
 Rules:
 
-- Project-local packages normally do not use `source` or hash-based `version`.
-- Do not place external resources under `packages` unless the user explicitly confirms they are now project-maintained assets.
+- `url` is the base URL or directory prefix.
+- `files` lists every file that belongs to the resource root.
+- `files` entries must be relative, must not be absolute, and must not contain `..`.
+- `source.entry` must be one of the listed files.
+- Multi-file URL sources must use `layout: dir`.
+- `version` must use `sha256tree:<hex>`.
+
+### Archive Source
+
+```yaml
+dependencies:
+  - name: analyzer
+    type: skill
+    layout: dir
+    path: .ctxpm/dependencies/skills/analyzer
+    entry: SKILL.md
+    source:
+      type: archive
+      url: https://example.com/downloads/analyzer.zip
+      path: skills/analyzer
+      entry: SKILL.md
+    version: sha256tree:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210
+```
+
+Rules:
+
+- The archive is downloaded and extracted before resolving the resource root.
+- `source.path` is the resource root inside the extracted archive.
+- `source.entry` is relative to `source.path`.
+- Use `sha256:<hex>` for file roots and `sha256tree:<hex>` for directory roots.
+
+## Version Semantics
+
+Dependency versions must describe the resolved **resource root**, not just a single guessed file.
+
+| Source shape | Version format |
+| --- | --- |
+| Git file or directory root | Full commit SHA |
+| Non-Git single-file root | `sha256:<hex>` |
+| Non-Git directory root | `sha256tree:<hex>` |
+
+`sha256tree` is computed from the full directory tree:
+
+1. Materialize the resource root.
+2. Recursively collect every file.
+3. Sort by relative path.
+4. Hash each file content with SHA-256.
+5. Hash the resulting path-and-hash manifest.
+
+Do not use branch names, tags, timestamps, filenames, or vague labels as dependency versions.
+
+## Packages
+
+`packages` are project-local resources and use the same root model:
+
+```yaml
+packages:
+  - name: project-review-rules
+    type: rule
+    layout: dir
+    path: .ctxpm/packages/rules/project-review-rules
+    entry: README.md
+    compatibility:
+      - .agents/rules/project-review-rules
+```
+
+Rules:
+
+- Packages normally omit `source` and `version`.
+- Use the same `layout` / `path` / `entry` model as dependencies.
 
 ## `entrypoints`
 
 `entrypoints` records root Markdown files that contain managed `ctxpm` blocks.
-
-Example:
 
 ```yaml
 entrypoints:
@@ -222,32 +274,16 @@ Rules:
 - Keys should match entries in `agents`.
 - `file` is the root entrypoint Markdown file.
 - `mode` should be `managed` when the file contains a managed `ctxpm` block.
-- The referenced file's managed block should begin with `<!-- ctxpm:begin agent=<entrypoint-key> -->`.
-- Managed entrypoint blocks should use the canonical `ctxpm` template defined by the protocol; only the `agent` value in the opening marker changes per entrypoint file.
 
 ## Compatibility Paths
 
-Use `compatibility` when an AI agent or tool expects resources in a default discovery location.
-
-Example:
-
-```yaml
-compatibility:
-  - .agents/skills/example-skill
-```
+Use `compatibility` when an agent expects resources in a default discovery location.
 
 Rules:
 
-- Compatibility paths point from agent-recognizable discovery locations to canonical `.ctxpm` locations.
-- By default, create compatibility paths for every confirmed agent that has a recognizable discovery directory for the resource type.
-- Do not create reverse symlinks from `.ctxpm` back to old/default locations.
-- Add compatibility paths to `.gitignore` when they are symlinks or compatibility facades.
-- Prefer one safe directory-level `.gitignore` rule over many per-resource rules when a directory contains only compatibility facades.
-  - Example: use `.agents/skills/` instead of many `.agents/skills/<name>` entries.
-  - Use `.agents/` only when the whole `.agents/` directory is a compatibility surface and contains no project-owned files that should remain tracked.
-- If a directory mixes compatibility facades with real project-owned files, use narrower child-directory rules or individual compatibility path rules.
-- Even when `.gitignore` uses a consolidated directory rule, keep `compatibility` entries precise in `ctxpm.yaml`.
-- If a confirmed agent has no recognizable discovery directory for a resource type, omit compatibility for that agent/type pair.
+- Compatibility paths point from agent-recognizable discovery locations to canonical `.ctxpm` roots.
+- Record precise paths in `ctxpm.yaml` even when `.gitignore` uses broader ignore rules.
+- `ctxpm install` should repair missing compatibility links for both dependencies and packages.
 
 ## Editing Rules
 
@@ -258,50 +294,4 @@ When modifying `ctxpm.yaml`:
 3. Do not reorder unrelated entries just for formatting.
 4. Keep paths relative to the project root.
 5. Keep `dependencies` and `packages` semantically separate.
-6. Update `compatibility` whenever compatibility symlinks are added or removed.
-7. Update `version` whenever an external dependency is updated.
-8. If source or version metadata cannot be determined, report the resource as unresolved instead of inventing values.
-
-## Minimal Complete Example
-
-```yaml
-version: 1
-
-project:
-  name: example-project
-
-agents:
-  - codex
-
-update_policy:
-  enabled: true
-  interval: 1d
-  include_self: true
-
-dependencies:
-  - name: ctxpm
-    type: skill
-    path: .ctxpm/dependencies/skills/ctxpm
-    compatibility:
-      - .agents/skills/ctxpm
-  - name: example-skill
-    type: skill
-    path: .ctxpm/dependencies/skills/example-skill
-    source:
-      type: github
-      url: https://github.com/example/example-ai-resources
-      path: skills/example-skill
-    version: 0123456789abcdef0123456789abcdef01234567
-    compatibility:
-      - .agents/skills/example-skill
-
-packages:
-  - name: project-rules
-    type: rule
-    path: .ctxpm/packages/rules/project-rules
-
-entrypoints:
-  codex:
-    file: AGENTS.md
-    mode: managed
-```
+6. Prefer minimal text edits over full-file rewrites when only a small field changes.

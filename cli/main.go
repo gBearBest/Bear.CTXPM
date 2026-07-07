@@ -18,6 +18,17 @@ type commandError struct {
 	code    int
 }
 
+type stringListFlag []string
+
+func (s *stringListFlag) String() string {
+	return strings.Join(*s, ",")
+}
+
+func (s *stringListFlag) Set(value string) error {
+	*s = append(*s, value)
+	return nil
+}
+
 func (e *commandError) Error() string {
 	return e.message
 }
@@ -106,19 +117,26 @@ func runAdd(app *engine.App, args []string) error {
 	args = reorderArgs(args, map[string]bool{
 		"--type":        true,
 		"--name":        true,
+		"--layout":      true,
+		"--source-type": true,
 		"--source-path": true,
 		"--target-path": true,
 		"--ref":         true,
 		"--entry":       true,
+		"--file":        true,
 	})
 	fs := flag.NewFlagSet("add", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	resourceType := fs.String("type", "", "Resource type: skill|rule|spec|prompt|mcp")
 	name := fs.String("name", "", "Override resource name")
+	layout := fs.String("layout", "", "Resource layout: file|dir")
+	sourceType := fs.String("source-type", "", "Source type: git|url|archive")
 	sourcePath := fs.String("source-path", "", "Path inside a git repository when it cannot be inferred from the URL")
 	targetPath := fs.String("target-path", "", "Override canonical install path")
 	ref := fs.String("ref", "", "Override git ref")
-	entry := fs.String("entry", "", "Entry filename for direct URL resources")
+	entry := fs.String("entry", "", "Entry filename relative to the resource root")
+	var files stringListFlag
+	fs.Var(&files, "file", "Relative file path for multi-file URL resources; repeat to add more files")
 	jsonOutput := fs.Bool("json", false, "Emit JSON output")
 	dryRun := fs.Bool("dry-run", false, "Resolve and report without changing files")
 	if err := fs.Parse(args); err != nil {
@@ -135,10 +153,13 @@ func runAdd(app *engine.App, args []string) error {
 		SourceURL:  fs.Arg(0),
 		Type:       *resourceType,
 		Name:       *name,
+		Layout:     *layout,
+		SourceType: *sourceType,
 		SourcePath: *sourcePath,
 		TargetPath: *targetPath,
 		Ref:        *ref,
 		Entry:      *entry,
+		Files:      append([]string(nil), files...),
 		DryRun:     *dryRun,
 	})
 	if err != nil {

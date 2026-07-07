@@ -17,6 +17,17 @@ import (
 
 const manifestIndent = 2
 
+const (
+	ManifestVersion1 = 1
+	ManifestVersion2 = 2
+
+	LayoutFile = "file"
+	LayoutDir  = "dir"
+
+	VersionPrefixSHA256     = "sha256:"
+	VersionPrefixSHA256Tree = "sha256tree:"
+)
+
 var (
 	ErrNotFound = errors.New("ctxpm manifest not found")
 )
@@ -57,18 +68,21 @@ type Entrypoint struct {
 type Resource struct {
 	Name          string   `yaml:"name"`
 	Type          string   `yaml:"type"`
+	Layout        string   `yaml:"layout,omitempty"`
 	Path          string   `yaml:"path"`
+	Entry         string   `yaml:"entry,omitempty"`
 	Source        *Source  `yaml:"source,omitempty"`
 	Version       string   `yaml:"version,omitempty"`
 	Compatibility []string `yaml:"compatibility,omitempty"`
 }
 
 type Source struct {
-	Type  string `yaml:"type"`
-	URL   string `yaml:"url"`
-	Path  string `yaml:"path,omitempty"`
-	Ref   string `yaml:"ref,omitempty"`
-	Entry string `yaml:"entry,omitempty"`
+	Type  string   `yaml:"type"`
+	URL   string   `yaml:"url"`
+	Path  string   `yaml:"path,omitempty"`
+	Ref   string   `yaml:"ref,omitempty"`
+	Entry string   `yaml:"entry,omitempty"`
+	Files []string `yaml:"files,omitempty"`
 }
 
 func DefaultPolicy() UpdatePolicy {
@@ -184,9 +198,9 @@ func RemovePackage(root, name string) (bool, error) {
 
 func (m *Manifest) Validate() error {
 	if m.Version == 0 {
-		m.Version = 1
+		m.Version = ManifestVersion2
 	}
-	if m.Version != 1 {
+	if m.Version != ManifestVersion1 && m.Version != ManifestVersion2 {
 		return fmt.Errorf("unsupported ctxpm.yaml version %d", m.Version)
 	}
 	if strings.TrimSpace(m.Project.Name) == "" {
@@ -198,7 +212,7 @@ func (m *Manifest) Validate() error {
 		}
 	}
 	for _, dep := range m.Dependencies {
-		if err := dep.Validate("dependency"); err != nil {
+		if err := dep.validate(m.Version, "dependency"); err != nil {
 			return err
 		}
 		if dep.Source == nil {
@@ -206,7 +220,7 @@ func (m *Manifest) Validate() error {
 		}
 	}
 	for _, pkg := range m.Packages {
-		if err := pkg.Validate("package"); err != nil {
+		if err := pkg.validate(m.Version, "package"); err != nil {
 			return err
 		}
 	}
@@ -214,6 +228,10 @@ func (m *Manifest) Validate() error {
 }
 
 func (r Resource) Validate(kind string) error {
+	return r.validate(ManifestVersion1, kind)
+}
+
+func (r Resource) validate(version int, kind string) error {
 	if strings.TrimSpace(r.Name) == "" {
 		return fmt.Errorf("%s name is required", kind)
 	}
@@ -230,24 +248,27 @@ func (r Resource) Validate(kind string) error {
 	if !strings.HasPrefix(filepath.ToSlash(r.Path), prefix) {
 		return fmt.Errorf("%s %q path %q must stay under %s", kind, r.Name, r.Path, prefix)
 	}
+	if version >= ManifestVersion2 {
+		if r.Layout != LayoutFile && r.Layout != LayoutDir {
+			return fmt.Errorf("%s %q has unsupported layout %q", kind, r.Name, r.Layout)
+		}
+		if err := validateRelativePath(r.Entry, fmt.Sprintf("%s %q entry", kind, r.Name)); err != nil {
+			return err
+		}
+		switch r.Layout {
+		case LayoutFile:
+			if filepath.Base(filepath.FromSlash(r.Path)) != filepath.Base(filepath.FromSlash(r.Entry)) {
+				return fmt.Errorf("%s %q entry %q must match file path %q", kind, r.Name, r.Entry, r.Path)
+			}
+		case LayoutDir:
+			if pathIsFileLike(r.Entry) == false && strings.TrimSpace(r.Entry) == "" {
+				return fmt.Errorf("%s %q directory resources require entry", kind, r.Name)
+			}
+		}
+	}
 	if r.Source != nil {
-		switch r.Source.NormalizedType() {
-		case "git":
-			if strings.TrimSpace(r.Source.URL) == "" {
-				return fmt.Errorf("%s %q git source is missing url", kind, r.Name)
-			}
-			if strings.TrimSpace(r.Source.Path) == "" {
-				return fmt.Errorf("%s %q git source is missing path", kind, r.Name)
-			}
-		case "url":
-			if strings.TrimSpace(r.Source.URL) == "" {
-				return fmt.Errorf("%s %q url source is missing url", kind, r.Name)
-			}
-			if strings.TrimSpace(r.Source.Entry) == "" {
-				return fmt.Errorf("%s %q url source is missing entry", kind, r.Name)
-			}
-		default:
-			return fmt.Errorf("%s %q has unsupported source.type %q", kind, r.Name, r.Source.Type)
+		if err := r.Source.validate(version, kind, r); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -259,9 +280,152 @@ func (s Source) NormalizedType() string {
 		return "git"
 	case "url":
 		return "url"
+	case "archive":
+		return "archive"
 	default:
 		return s.Type
 	}
+}
+
+func (r Resource) EffectiveLayout() string {
+	if strings.TrimSpace(r.Layout) != "" {
+		return r.Layout
+	}
+	if r.Source != nil {
+		if len(r.Source.Files) > 0 {
+			return LayoutDir
+		}
+		if strings.TrimSpace(r.Source.Path) != "" && !pathIsFileLike(r.Source.Path) {
+			return LayoutDir
+		}
+		if strings.TrimSpace(r.Source.Path) != "" && pathIsFileLike(r.Source.Path) {
+			return LayoutFile
+		}
+	}
+	if pathIsFileLike(r.Path) {
+		return LayoutFile
+	}
+	return LayoutDir
+}
+
+func (r Resource) EffectiveEntry() string {
+	if strings.TrimSpace(r.Entry) != "" {
+		return filepath.ToSlash(strings.TrimSpace(r.Entry))
+	}
+	switch r.EffectiveLayout() {
+	case LayoutFile:
+		return filepath.Base(filepath.ToSlash(r.Path))
+	case LayoutDir:
+		if r.Type == "skill" {
+			return "SKILL.md"
+		}
+	}
+	return ""
+}
+
+func (r Resource) EntryPath() string {
+	entry := r.EffectiveEntry()
+	switch r.EffectiveLayout() {
+	case LayoutDir:
+		return filepath.ToSlash(filepath.Join(r.Path, entry))
+	case LayoutFile:
+		return filepath.ToSlash(r.Path)
+	default:
+		return filepath.ToSlash(r.Path)
+	}
+}
+
+func (s Source) validate(version int, kind string, resource Resource) error {
+	sourceType := s.NormalizedType()
+	switch sourceType {
+	case "git":
+		if strings.TrimSpace(s.URL) == "" {
+			return fmt.Errorf("%s %q git source is missing url", kind, resource.Name)
+		}
+		if strings.TrimSpace(s.Path) == "" {
+			return fmt.Errorf("%s %q git source is missing path", kind, resource.Name)
+		}
+		if version >= ManifestVersion2 {
+			if err := validateRelativePath(s.Path, fmt.Sprintf("%s %q git source.path", kind, resource.Name)); err != nil {
+				return err
+			}
+			if err := validateRelativePath(s.Entry, fmt.Sprintf("%s %q git source.entry", kind, resource.Name)); err != nil {
+				return err
+			}
+		}
+	case "url":
+		if strings.TrimSpace(s.URL) == "" {
+			return fmt.Errorf("%s %q url source is missing url", kind, resource.Name)
+		}
+		if version == ManifestVersion1 && strings.TrimSpace(s.Entry) == "" {
+			return fmt.Errorf("%s %q url source is missing entry", kind, resource.Name)
+		}
+		if version >= ManifestVersion2 {
+			if err := validateRelativePath(s.Entry, fmt.Sprintf("%s %q url source.entry", kind, resource.Name)); err != nil {
+				return err
+			}
+			if len(s.Files) > 0 {
+				if resource.EffectiveLayout() != LayoutDir {
+					return fmt.Errorf("%s %q url source.files requires layout dir", kind, resource.Name)
+				}
+				seen := map[string]bool{}
+				for _, file := range s.Files {
+					if err := validateRelativePath(file, fmt.Sprintf("%s %q url source.files entry", kind, resource.Name)); err != nil {
+						return err
+					}
+					if seen[file] {
+						return fmt.Errorf("%s %q url source.files contains duplicate %q", kind, resource.Name, file)
+					}
+					seen[file] = true
+				}
+				if !seen[s.Entry] {
+					return fmt.Errorf("%s %q url source.entry %q must be listed in source.files", kind, resource.Name, s.Entry)
+				}
+			} else if resource.EffectiveLayout() != LayoutFile {
+				return fmt.Errorf("%s %q single-file url source requires layout file", kind, resource.Name)
+			}
+		}
+	case "archive":
+		if version < ManifestVersion2 {
+			return fmt.Errorf("%s %q uses unsupported source.type %q", kind, resource.Name, s.Type)
+		}
+		if strings.TrimSpace(s.URL) == "" {
+			return fmt.Errorf("%s %q archive source is missing url", kind, resource.Name)
+		}
+		if strings.TrimSpace(s.Path) == "" {
+			return fmt.Errorf("%s %q archive source is missing path", kind, resource.Name)
+		}
+		if err := validateRelativePath(s.Path, fmt.Sprintf("%s %q archive source.path", kind, resource.Name)); err != nil {
+			return err
+		}
+		if err := validateRelativePath(s.Entry, fmt.Sprintf("%s %q archive source.entry", kind, resource.Name)); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("%s %q has unsupported source.type %q", kind, resource.Name, s.Type)
+	}
+	return nil
+}
+
+func validateRelativePath(value, label string) error {
+	trimmed := filepath.ToSlash(strings.TrimSpace(value))
+	if trimmed == "" {
+		return fmt.Errorf("%s is required", label)
+	}
+	if strings.HasPrefix(trimmed, "/") {
+		return fmt.Errorf("%s %q must be relative", label, value)
+	}
+	for _, segment := range strings.Split(trimmed, "/") {
+		if segment == ".." {
+			return fmt.Errorf("%s %q must not contain '..'", label, value)
+		}
+	}
+	return nil
+}
+
+func pathIsFileLike(value string) bool {
+	base := filepath.Base(filepath.ToSlash(strings.TrimSpace(value)))
+	return strings.Contains(base, ".")
 }
 
 func TypeDir(resourceType string) string {

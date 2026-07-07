@@ -127,13 +127,15 @@ If a user or AI later wants to introduce a new skill, rule, spec, prompt, or MCP
 
 When installing or updating an external `dependency`, record a stable hash-based version in `ctxpm.yaml` whenever the source is known.
 
-- If the resource is installed from a GitHub repository, resolve the exact commit SHA that provided the installed resource and record that full commit SHA as the dependency `version`.
-- Do not also duplicate that same GitHub commit SHA under `source.commit`; `version` is the authoritative installed revision.
-- If the resource is installed from a direct URL, compute the SHA-256 hash of the AI resource entry file content after download and record it as the dependency `version` using the format `sha256:<hex>`.
-- The entry file is the file the AI agent should read first for that resource, such as `SKILL.md`, a rule file, a prompt file, a spec entry file, or an MCP configuration file.
-- If a URL-installed resource has no single clear entry file, ask the user to choose the entry file before computing the hash.
+- Versions describe the resolved **resource root**, not just a guessed single file.
+- If the resource is installed from Git, resolve the exact commit SHA that provided the resource root and record that full commit SHA as the dependency `version`.
+- Do not also duplicate that same Git commit SHA under `source.commit`; `version` is the authoritative installed revision.
+- If the resource root is a non-Git single file, compute `version: sha256:<hex>`.
+- If the resource root is a non-Git directory, compute `version: sha256tree:<hex>` from the full directory tree.
+- The entry file is the file the AI agent should read first inside the resource root, such as `SKILL.md`, a rule file, a prompt file, a spec entry file, or an MCP configuration file.
+- If a multi-file URL resource is used, explicitly list all member files and record the root as `layout: dir`.
 - Do not use branch names, tags, `latest`, filenames, timestamps, or vague release labels as the version value for external AI resources.
-- If the source or entry-file hash cannot be confirmed, mark the version as unresolved in the installation report instead of inventing a value.
+- If the source hash cannot be confirmed, mark the version as unresolved in the installation report instead of inventing a value.
 
 This hash-based version is the baseline for future external resource update detection and update decisions.
 
@@ -374,7 +376,7 @@ Install the complete format document as the `ctxpm` skill companion file at `.ct
 Reference template for `ctxpm.yaml`:
 
 ```yaml
-version: 1
+version: 2
 
 project:
   name: your-project-name
@@ -400,19 +402,22 @@ entrypoints:
 Complete `dependencies` and `packages` based on the actual scan results.
 
 For external dependencies with a known GitHub or URL source, include `source` and `version`.
-For GitHub dependencies, `source` locates the upstream resource and `version` records the installed commit SHA; do not duplicate the same commit SHA as `source.commit`.
+For Git dependencies, `source` locates the upstream resource root and `version` records the installed commit SHA.
 
-GitHub dependency example:
+Git dependency example:
 
 ```yaml
 dependencies:
   - name: example-skill
     type: skill
+    layout: dir
     path: .ctxpm/dependencies/skills/example-skill
+    entry: SKILL.md
     source:
-      type: github
+      type: git
       url: https://github.com/example/example-ai-resources
       path: skills/example-skill
+      entry: SKILL.md
     version: 0123456789abcdef0123456789abcdef01234567
 ```
 
@@ -422,12 +427,33 @@ Direct URL dependency example:
 dependencies:
   - name: example-rule
     type: rule
+    layout: file
     path: .ctxpm/dependencies/rules/example-rule.md
+    entry: example-rule.md
     source:
       type: url
       url: https://example.com/ai/rules/example-rule.md
       entry: example-rule.md
     version: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+```
+
+Multi-file URL dependency example:
+
+```yaml
+dependencies:
+  - name: reviewer
+    type: skill
+    layout: dir
+    path: .ctxpm/dependencies/skills/reviewer
+    entry: SKILL.md
+    source:
+      type: url
+      url: https://example.com/ai/reviewer/
+      files:
+        - SKILL.md
+        - rules/review.md
+      entry: SKILL.md
+    version: sha256tree:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789
 ```
 
 ### 5.8 Write the Root Markdown Entrypoint File
@@ -489,10 +515,12 @@ At minimum, this step must:
    - On Windows-like shell environments, the project-local directory may also include sibling helper launchers such as `ctxpm.exe` and `ctxpm.cmd`, but `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm` remains the canonical launcher path for the protocol-managed installation.
 5. Immediately create compatibility symlinks in every confirmed agent's default skill discovery directories, such as `.agents/skills/ctxpm`, so each agent can discover the skill from its normal skill or slash-command UI.
 6. Record `ctxpm` in `ctxpm.yaml` as an external `dependency` of type `skill`.
-7. Record both the canonical `.ctxpm/dependencies/...` path and every compatibility symlink path in `ctxpm.yaml`.
-8. Do not omit the `compatibility` field for `ctxpm`.
-9. Record a compatibility path in `ctxpm.yaml` for every confirmed agent's supported skill discovery directory.
-10. Ensure the generated `SKILL.md` contains a compact `ctxpm.yaml` format reference and points to the sibling `ctxpm-yaml.md` companion document.
+7. Record the full skill directory as a directory resource root, with `layout: dir`, `path: .ctxpm/dependencies/skills/ctxpm`, and `entry: SKILL.md`.
+8. When the bundled source is described explicitly, prefer `source.type: git` with `source.path: resources/skills/ctxpm` and `source.entry: SKILL.md`.
+9. Record both the canonical `.ctxpm/dependencies/...` path and every compatibility symlink path in `ctxpm.yaml`.
+10. Do not omit the `compatibility` field for `ctxpm`.
+11. Record a compatibility path in `ctxpm.yaml` for every confirmed agent's supported skill discovery directory.
+12. Ensure the generated `SKILL.md` contains a compact `ctxpm.yaml` format reference and points to the sibling `ctxpm-yaml.md` companion document.
 
 ### 5.10 Adjust `.gitignore`
 

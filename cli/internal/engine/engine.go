@@ -2,8 +2,6 @@ package engine
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -75,7 +73,7 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 		}
 	case errors.Is(err, manifest.ErrNotFound):
 		m = &manifest.Manifest{
-			Version:      1,
+			Version:      manifest.ManifestVersion2,
 			Project:      manifest.Project{Name: projectName},
 			Agents:       []string{opts.Agent},
 			UpdatePolicy: manifest.DefaultPolicy(),
@@ -160,10 +158,13 @@ type AddOptions struct {
 	SourceURL  string
 	Type       string
 	Name       string
+	Layout     string
+	SourceType string
 	SourcePath string
 	TargetPath string
 	Ref        string
 	Entry      string
+	Files      []string
 	DryRun     bool
 }
 
@@ -186,10 +187,13 @@ func (a *App) Add(ctx context.Context, opts AddOptions) (*AddResult, error) {
 		RawURL:       opts.SourceURL,
 		ResourceType: opts.Type,
 		Name:         opts.Name,
+		Layout:       opts.Layout,
+		SourceType:   opts.SourceType,
 		SourcePath:   opts.SourcePath,
 		TargetPath:   opts.TargetPath,
 		Ref:          opts.Ref,
 		Entry:        opts.Entry,
+		Files:        opts.Files,
 	})
 	if err != nil {
 		return nil, err
@@ -329,8 +333,8 @@ func (a *App) Validate() (*ValidateResult, error) {
 	}
 	for _, dep := range m.Dependencies {
 		abs := filepath.Join(a.Root, filepath.FromSlash(dep.Path))
-		if _, err := os.Stat(abs); err != nil {
-			issues = append(issues, fmt.Sprintf("dependency %q path %q is missing", dep.Name, dep.Path))
+		if err := validateResolvedResource(abs, dep); err != nil {
+			issues = append(issues, err.Error())
 		}
 		for _, compat := range dep.Compatibility {
 			compatAbs := filepath.Join(a.Root, filepath.FromSlash(compat))
@@ -341,8 +345,8 @@ func (a *App) Validate() (*ValidateResult, error) {
 	}
 	for _, pkg := range m.Packages {
 		abs := filepath.Join(a.Root, filepath.FromSlash(pkg.Path))
-		if _, err := os.Stat(abs); err != nil {
-			issues = append(issues, fmt.Sprintf("package %q path %q is missing", pkg.Name, pkg.Path))
+		if err := validateResolvedResource(abs, pkg); err != nil {
+			issues = append(issues, err.Error())
 		}
 		for _, compat := range pkg.Compatibility {
 			compatAbs := filepath.Join(a.Root, filepath.FromSlash(compat))
@@ -747,139 +751,31 @@ type installOutcome struct {
 }
 
 func (a *App) installResource(ctx context.Context, resource *manifest.Resource, versionOverride string) (*installOutcome, error) {
-	if resource.Source == nil {
-		return nil, fmt.Errorf("resource %q has no source", resource.Name)
+	resolved, err := a.resolveResource(ctx, *resource, resolveOptions{
+		VersionOverride:    versionOverride,
+		UseRecordedVersion: versionOverride == "",
+	})
+	if err != nil {
+		return nil, err
 	}
-	switch resource.Source.NormalizedType() {
-	case "git":
-		version, err := a.installGitResource(ctx, resource, versionOverride)
-		if err != nil {
-			return nil, err
-		}
-		return &installOutcome{Status: "installed", Version: version}, nil
-	case "url":
-		version, err := a.installURLResource(ctx, resource, versionOverride)
-		if err != nil {
-			return nil, err
-		}
-		return &installOutcome{Status: "installed", Version: version}, nil
-	default:
-		return nil, fmt.Errorf("resource %q has unsupported source type %q", resource.Name, resource.Source.Type)
+	defer resolved.Close()
+	destination := filepath.Join(a.Root, filepath.FromSlash(resource.Path))
+	if err := replacePath(resolved.LocalPath, destination); err != nil {
+		return nil, err
 	}
+	if err := ensureCompatibility(a.Root, *resource); err != nil {
+		return nil, err
+	}
+	return &installOutcome{Status: "installed", Version: resolved.Version}, nil
 }
 
 func (a *App) resolveLatestVersion(ctx context.Context, resource manifest.Resource) (string, error) {
-	switch resource.Source.NormalizedType() {
-	case "git":
-		return latestGitVersion(ctx, resource.Source.URL, resource.Source.Ref, resource.Source.Path)
-	case "url":
-		content, err := fetchURL(ctx, resource.Source.URL)
-		if err != nil {
-			return "", err
-		}
-		sum := sha256.Sum256(content)
-		return "sha256:" + hex.EncodeToString(sum[:]), nil
-	default:
-		return "", fmt.Errorf("unsupported source type %q", resource.Source.Type)
-	}
-}
-
-func (a *App) installGitResource(ctx context.Context, resource *manifest.Resource, versionOverride string) (string, error) {
-	tmpDir, err := os.MkdirTemp("", "ctxpm-git-*")
+	resolved, err := a.resolveResource(ctx, resource, resolveOptions{})
 	if err != nil {
 		return "", err
 	}
-	defer os.RemoveAll(tmpDir)
-
-	repoDir := filepath.Join(tmpDir, "repo")
-	if _, err := runGit(ctx, "clone", "--quiet", resource.Source.URL, repoDir); err != nil {
-		return "", err
-	}
-
-	targetVersion := strings.TrimSpace(versionOverride)
-	if targetVersion == "" {
-		targetVersion = strings.TrimSpace(resource.Version)
-	}
-	if targetVersion != "" {
-		if _, err := runGit(ctx, "-C", repoDir, "checkout", "--quiet", targetVersion); err != nil {
-			return "", err
-		}
-	} else if strings.TrimSpace(resource.Source.Ref) != "" {
-		if _, err := runGit(ctx, "-C", repoDir, "checkout", "--quiet", resource.Source.Ref); err != nil {
-			return "", err
-		}
-	}
-
-	sourcePath := filepath.Join(repoDir, filepath.FromSlash(resource.Source.Path))
-	if _, err := os.Stat(sourcePath); err != nil {
-		return "", fmt.Errorf("resolved source path %q does not exist for %s", resource.Source.Path, resource.Name)
-	}
-	destination := filepath.Join(a.Root, filepath.FromSlash(resource.Path))
-	if err := replacePath(sourcePath, destination); err != nil {
-		return "", err
-	}
-	if err := ensureCompatibility(a.Root, *resource); err != nil {
-		return "", err
-	}
-	version, err := runGit(ctx, "-C", repoDir, "log", "-1", "--format=%H", "HEAD", "--", resource.Source.Path)
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(version), nil
-}
-
-func (a *App) installURLResource(ctx context.Context, resource *manifest.Resource, versionOverride string) (string, error) {
-	content, err := fetchURL(ctx, resource.Source.URL)
-	if err != nil {
-		return "", err
-	}
-	sum := sha256.Sum256(content)
-	version := "sha256:" + hex.EncodeToString(sum[:])
-	if expected := strings.TrimSpace(versionOverride); expected != "" && expected != version {
-		return "", fmt.Errorf("downloaded content for %s does not match requested version %s", resource.Name, expected)
-	}
-	if expected := strings.TrimSpace(resource.Version); versionOverride == "" && expected != "" && expected != version {
-		return "", fmt.Errorf("downloaded content for %s does not match manifest version %s", resource.Name, expected)
-	}
-
-	target := filepath.Join(a.Root, filepath.FromSlash(resource.Path))
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		return "", err
-	}
-	if err := os.WriteFile(target, content, 0o644); err != nil {
-		return "", err
-	}
-	if err := ensureCompatibility(a.Root, *resource); err != nil {
-		return "", err
-	}
-	return version, nil
-}
-
-func latestGitVersion(ctx context.Context, cloneURL, ref, sourcePath string) (string, error) {
-	tmpDir, err := os.MkdirTemp("", "ctxpm-git-check-*")
-	if err != nil {
-		return "", err
-	}
-	defer os.RemoveAll(tmpDir)
-
-	repoDir := filepath.Join(tmpDir, "repo")
-	args := []string{"clone", "--quiet"}
-	if strings.TrimSpace(ref) != "" {
-		args = append(args, "--branch", ref)
-	}
-	args = append(args, cloneURL, repoDir)
-	if _, err := runGit(ctx, args...); err != nil {
-		return "", err
-	}
-	version, err := runGit(ctx, "-C", repoDir, "log", "-1", "--format=%H", "HEAD", "--", sourcePath)
-	if err != nil {
-		return "", err
-	}
-	version = strings.TrimSpace(version)
-	if version == "" {
-		return "", fmt.Errorf("could not resolve latest git revision for %s", sourcePath)
-	}
-	return version, nil
+	defer resolved.Close()
+	return resolved.Version, nil
 }
 
 func fetchURL(ctx context.Context, rawURL string) ([]byte, error) {
@@ -943,11 +839,11 @@ func ensureCompatibility(root string, resource manifest.Resource) error {
 
 func ensureResourcePresence(root string, resource manifest.Resource, kind string) error {
 	targetPath := filepath.Join(root, filepath.FromSlash(resource.Path))
-	if _, err := os.Stat(targetPath); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("%s %q path %q is missing", kind, resource.Name, resource.Path)
+	if err := validateResolvedResource(targetPath, resource); err != nil {
+		if kind == "" {
+			return err
 		}
-		return err
+		return fmt.Errorf("%s %w", kind, err)
 	}
 	return nil
 }
@@ -1028,7 +924,7 @@ func pathLeaf(resourcePath string) string {
 }
 
 func localStatus(root string, resource manifest.Resource) string {
-	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(resource.Path))); err != nil {
+	if err := validateResolvedResource(filepath.Join(root, filepath.FromSlash(resource.Path)), resource); err != nil {
 		return "missing"
 	}
 	for _, compat := range resource.Compatibility {

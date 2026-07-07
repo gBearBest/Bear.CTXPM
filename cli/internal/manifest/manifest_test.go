@@ -6,6 +6,43 @@ import (
 	"testing"
 )
 
+func TestValidateV2MultiFileURLResource(t *testing.T) {
+	resource := Resource{
+		Name:   "reviewer",
+		Type:   "skill",
+		Layout: LayoutDir,
+		Path:   ".ctxpm/dependencies/skills/reviewer",
+		Entry:  "SKILL.md",
+		Source: &Source{
+			Type:  "url",
+			URL:   "https://example.com/reviewer/",
+			Entry: "SKILL.md",
+			Files: []string{"SKILL.md", "rules/review.md"},
+		},
+	}
+	if err := resource.validate(ManifestVersion2, "dependency"); err != nil {
+		t.Fatalf("validate() error = %v", err)
+	}
+}
+
+func TestValidateV2RejectsSingleFileURLDirectoryLayout(t *testing.T) {
+	resource := Resource{
+		Name:   "reviewer",
+		Type:   "skill",
+		Layout: LayoutDir,
+		Path:   ".ctxpm/dependencies/skills/reviewer",
+		Entry:  "SKILL.md",
+		Source: &Source{
+			Type:  "url",
+			URL:   "https://example.com/reviewer.md",
+			Entry: "SKILL.md",
+		},
+	}
+	if err := resource.validate(ManifestVersion2, "dependency"); err == nil {
+		t.Fatalf("validate() error = nil, want rejection")
+	}
+}
+
 func TestSaveUsesTwoSpaceIndent(t *testing.T) {
 	root := t.TempDir()
 	m := &Manifest{
