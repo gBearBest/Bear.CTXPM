@@ -1121,6 +1121,90 @@ func TestUpdateRefreshesAllManagedEntrypoints(t *testing.T) {
 	}
 }
 
+func TestUpdateRunsInstallAfterManifestRefresh(t *testing.T) {
+	root := t.TempDir()
+	server := newSingleFileUpdateServer(t, "/reviewer.md", "# reviewer\n")
+	defer server.Close()
+
+	packagePath := ".ctxpm/packages/rules/project-review.md"
+	if err := os.MkdirAll(filepath.Join(root, ".ctxpm/packages/rules"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(packagePath)), []byte("project review\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	app := New(root)
+	latest, err := app.resolveLatestVersion(context.Background(), manifest.Resource{
+		Name:   "reviewer",
+		Type:   "rule",
+		Layout: manifest.LayoutFile,
+		Path:   ".ctxpm/dependencies/rules/reviewer.md",
+		Entry:  "reviewer.md",
+		Source: &manifest.Source{
+			Type:  "url",
+			URL:   server.URL + "/reviewer.md",
+			Entry: "reviewer.md",
+		},
+	})
+	if err != nil {
+		t.Fatalf("resolveLatestVersion() error = %v", err)
+	}
+
+	entrypoint := filepath.Join(root, "AGENTS.md")
+	original := "Intro\n\n<!-- ctxpm:begin agent=generic -->\nold instructions\n<!-- ctxpm:end -->\n\nFooter\n"
+	if err := os.WriteFile(entrypoint, []byte(original), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version: 2,
+		Project: manifest.Project{Name: "sample"},
+		Agents:  []string{"generic"},
+		Dependencies: []manifest.Resource{
+			{
+				Name:   "reviewer",
+				Type:   "rule",
+				Layout: manifest.LayoutFile,
+				Path:   ".ctxpm/dependencies/rules/reviewer.md",
+				Entry:  "reviewer.md",
+				Source: &manifest.Source{
+					Type:  "url",
+					URL:   server.URL + "/reviewer.md",
+					Entry: "reviewer.md",
+				},
+				Version:       latest,
+				Compatibility: []string{".agents/rules/reviewer.md"},
+			},
+		},
+		Packages: []manifest.Resource{
+			{
+				Name:          "project-review",
+				Type:          "rule",
+				Layout:        manifest.LayoutFile,
+				Path:          packagePath,
+				Entry:         "project-review.md",
+				Compatibility: []string{".agents/rules/project-review.md"},
+			},
+		},
+		Entrypoints: map[string]manifest.Entrypoint{
+			"generic": {File: "AGENTS.md", Mode: "managed"},
+		},
+	})
+
+	if _, err := app.Update(context.Background(), UpdateOptions{Names: []string{"reviewer"}}); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	if got := readFileForTest(t, entrypoint); got != "Intro\n\n"+manifest.ManagedEntrypoint("generic")+"\n\nFooter\n" {
+		t.Fatalf("entrypoint mismatch\n--- got ---\n%s", got)
+	}
+	if target, err := os.Readlink(filepath.Join(root, ".agents", "rules", "project-review.md")); err != nil {
+		t.Fatalf("Readlink() error = %v", err)
+	} else if target != "../../.ctxpm/packages/rules/project-review.md" {
+		t.Fatalf("compat symlink = %q", target)
+	}
+}
+
 func TestUpdateReportsDamagedManagedBlock(t *testing.T) {
 	root := t.TempDir()
 	server := newSingleFileUpdateServer(t, "/reviewer.md", "# reviewer\n")
