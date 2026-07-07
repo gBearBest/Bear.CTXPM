@@ -144,13 +144,13 @@ Short summary of what this version represents.
 Install latest stable:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/main/cli/install.sh | sh -s -- --scope global --version latest
+curl -fsSL https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/latest/cli/install.sh | sh -s -- --scope global
 ```
 
 Pin this release:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/main/cli/install.sh | sh -s -- --scope global --version v0.1.0
+curl -fsSL https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/latest/cli/install.sh | sh -s -- --scope global --version v0.1.0
 ```
 
 ## Release assets
