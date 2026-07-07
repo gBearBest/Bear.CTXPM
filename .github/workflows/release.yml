@@ -2,17 +2,8 @@ name: release
 
 on:
   push:
-    branches:
-      - main
-      - develop
-      - "release/**"
-      - "hotfix/**"
     tags:
       - "v*.*.*"
-  pull_request:
-    branches:
-      - main
-      - develop
 
 permissions:
   contents: write
