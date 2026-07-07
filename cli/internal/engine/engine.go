@@ -344,6 +344,12 @@ func (a *App) Validate() (*ValidateResult, error) {
 		if _, err := os.Stat(abs); err != nil {
 			issues = append(issues, fmt.Sprintf("package %q path %q is missing", pkg.Name, pkg.Path))
 		}
+		for _, compat := range pkg.Compatibility {
+			compatAbs := filepath.Join(a.Root, filepath.FromSlash(compat))
+			if _, err := os.Lstat(compatAbs); err != nil {
+				issues = append(issues, fmt.Sprintf("compatibility path %q is missing", compat))
+			}
+		}
 	}
 	return &ValidateResult{OK: len(issues) == 0, Issues: issues}, nil
 }
@@ -355,6 +361,7 @@ type InstallOptions struct {
 }
 
 type InstallAction struct {
+	Kind    string `json:"kind,omitempty"`
 	Name    string `json:"name"`
 	Status  string `json:"status"`
 	Version string `json:"version,omitempty"`
@@ -369,6 +376,9 @@ func (r InstallResult) Text() string {
 	lines := []string{"Install status: " + r.Status}
 	for _, item := range r.Actions {
 		line := fmt.Sprintf("- %s [%s]", item.Name, item.Status)
+		if item.Kind != "" {
+			line += " kind=" + item.Kind
+		}
 		if item.Version != "" {
 			line += " version=" + item.Version
 		}
@@ -393,7 +403,7 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 			continue
 		}
 		if opts.DryRun {
-			actions = append(actions, InstallAction{Name: dep.Name, Status: "would_install", Version: dep.Version})
+			actions = append(actions, InstallAction{Kind: "dependency", Name: dep.Name, Status: "would_install", Version: dep.Version})
 			continue
 		}
 		installed, err := a.installResource(ctx, dep, dep.Version)
@@ -405,7 +415,27 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 		if previousVersion != dep.Version {
 			versionUpdates[dep.Name] = dep.Version
 		}
-		actions = append(actions, InstallAction{Name: dep.Name, Status: installed.Status, Version: dep.Version})
+		actions = append(actions, InstallAction{Kind: "dependency", Name: dep.Name, Status: installed.Status, Version: dep.Version})
+	}
+	for i := range m.Packages {
+		pkg := &m.Packages[i]
+		if opts.Type != "" && pkg.Type != opts.Type {
+			continue
+		}
+		if opts.Only != "" && pkg.Name != opts.Only {
+			continue
+		}
+		if opts.DryRun {
+			actions = append(actions, InstallAction{Kind: "package", Name: pkg.Name, Status: "would_link"})
+			continue
+		}
+		if err := ensureResourcePresence(a.Root, *pkg, "package"); err != nil {
+			return nil, err
+		}
+		if err := ensureCompatibility(a.Root, *pkg); err != nil {
+			return nil, err
+		}
+		actions = append(actions, InstallAction{Kind: "package", Name: pkg.Name, Status: "linked"})
 	}
 	if !opts.DryRun && len(versionUpdates) > 0 {
 		if _, err := manifest.UpdateResourceVersions(a.Root, versionUpdates); err != nil {
@@ -907,6 +937,17 @@ func ensureCompatibility(root string, resource manifest.Resource) error {
 		if err := os.Symlink(relTarget, linkPath); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func ensureResourcePresence(root string, resource manifest.Resource, kind string) error {
+	targetPath := filepath.Join(root, filepath.FromSlash(resource.Path))
+	if _, err := os.Stat(targetPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("%s %q path %q is missing", kind, resource.Name, resource.Path)
+		}
+		return err
 	}
 	return nil
 }

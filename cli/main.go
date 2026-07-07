@@ -185,8 +185,8 @@ func runValidate(app *engine.App, args []string) error {
 func runInstall(app *engine.App, args []string) error {
 	fs := flag.NewFlagSet("install", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	resourceType := fs.String("type", "", "Only install dependencies of this type")
-	only := fs.String("only", "", "Only install a single dependency by name")
+	resourceType := fs.String("type", "", "Only install resources of this type")
+	only := fs.String("only", "", "Only install or repair a single resource by name")
 	dryRun := fs.Bool("dry-run", false, "Report the work without writing files")
 	jsonOutput := fs.Bool("json", false, "Emit JSON output")
 	if err := fs.Parse(args); err != nil {
@@ -299,7 +299,7 @@ func printHelp(w *os.File) {
 		"Commands:",
 		"  init           Initialize the current project as a Bear.CTXPM project",
 		"  add            Add and install an external AI resource from a URL",
-		"  install        Install or repair dependencies from ctxpm.yaml",
+		"  install        Install dependencies and repair compatibility links",
 		"  list           List dependencies and packages",
 		"  validate       Validate ctxpm.yaml and local paths",
 		"  check-updates  Check whether dependencies have upstream updates",
