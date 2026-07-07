@@ -996,6 +996,191 @@ func TestInstallArchiveDependency(t *testing.T) {
 	}
 }
 
+func TestUpdateRefreshesManagedEntrypointBlocks(t *testing.T) {
+	root := t.TempDir()
+	server := newSingleFileUpdateServer(t, "/reviewer.md", "# reviewer\n")
+	defer server.Close()
+
+	entrypoint := filepath.Join(root, "AGENTS.md")
+	original := "Intro\n\n<!-- ctxpm:begin agent=generic -->\nold instructions\n<!-- ctxpm:end -->\n\nFooter\n"
+	if err := os.WriteFile(entrypoint, []byte(original), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version: 2,
+		Project: manifest.Project{Name: "sample"},
+		Agents:  []string{"generic"},
+		Dependencies: []manifest.Resource{
+			{
+				Name:   "reviewer",
+				Type:   "rule",
+				Layout: manifest.LayoutFile,
+				Path:   ".ctxpm/dependencies/rules/reviewer.md",
+				Entry:  "reviewer.md",
+				Source: &manifest.Source{
+					Type:  "url",
+					URL:   server.URL + "/reviewer.md",
+					Entry: "reviewer.md",
+				},
+				Version:       "sha256:stale",
+				Compatibility: []string{".agents/rules/reviewer.md"},
+			},
+		},
+		Packages: []manifest.Resource{},
+		Entrypoints: map[string]manifest.Entrypoint{
+			"generic": {File: "AGENTS.md", Mode: "managed"},
+		},
+	})
+
+	app := New(root)
+	result, err := app.Update(context.Background(), UpdateOptions{Names: []string{"reviewer"}})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if result.Status != "applied" {
+		t.Fatalf("Update() status = %q", result.Status)
+	}
+
+	got := readFileForTest(t, entrypoint)
+	want := "Intro\n\n" + manifest.ManagedEntrypoint("generic") + "\n\nFooter\n"
+	if got != want {
+		t.Fatalf("entrypoint mismatch\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+	loaded, _, err := manifest.Load(root)
+	if err != nil {
+		t.Fatalf("manifest.Load() error = %v", err)
+	}
+	if loaded.Dependencies[0].Version == "sha256:stale" {
+		t.Fatalf("dependency version was not updated")
+	}
+}
+
+func TestUpdateRefreshesAllManagedEntrypoints(t *testing.T) {
+	root := t.TempDir()
+	server := newSingleFileUpdateServer(t, "/reviewer.md", "# reviewer\n")
+	defer server.Close()
+
+	for _, item := range []struct {
+		file  string
+		agent string
+		body  string
+	}{
+		{file: "AGENTS.md", agent: "generic", body: "generic instructions"},
+		{file: "CLAUDE.md", agent: "claude-code", body: "claude instructions"},
+	} {
+		path := filepath.Join(root, item.file)
+		original := "Intro\n\n<!-- ctxpm:begin agent=" + item.agent + " -->\n" + item.body + "\n<!-- ctxpm:end -->\n\nFooter\n"
+		if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+			t.Fatalf("WriteFile(%s) error = %v", item.file, err)
+		}
+	}
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version: 2,
+		Project: manifest.Project{Name: "sample"},
+		Agents:  []string{"generic", "claude-code"},
+		Dependencies: []manifest.Resource{
+			{
+				Name:   "reviewer",
+				Type:   "rule",
+				Layout: manifest.LayoutFile,
+				Path:   ".ctxpm/dependencies/rules/reviewer.md",
+				Entry:  "reviewer.md",
+				Source: &manifest.Source{
+					Type:  "url",
+					URL:   server.URL + "/reviewer.md",
+					Entry: "reviewer.md",
+				},
+				Version:       "sha256:stale",
+				Compatibility: []string{".agents/rules/reviewer.md"},
+			},
+		},
+		Packages: []manifest.Resource{},
+		Entrypoints: map[string]manifest.Entrypoint{
+			"generic":     {File: "AGENTS.md", Mode: "managed"},
+			"claude-code": {File: "CLAUDE.md", Mode: "managed"},
+		},
+	})
+
+	app := New(root)
+	if _, err := app.Update(context.Background(), UpdateOptions{Names: []string{"reviewer"}}); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	for _, item := range []struct {
+		file  string
+		agent string
+	}{
+		{file: "AGENTS.md", agent: "generic"},
+		{file: "CLAUDE.md", agent: "claude-code"},
+	} {
+		got := readFileForTest(t, filepath.Join(root, item.file))
+		want := "Intro\n\n" + manifest.ManagedEntrypoint(item.agent) + "\n\nFooter\n"
+		if got != want {
+			t.Fatalf("%s mismatch\n--- got ---\n%s\n--- want ---\n%s", item.file, got, want)
+		}
+	}
+}
+
+func TestUpdateReportsDamagedManagedBlock(t *testing.T) {
+	root := t.TempDir()
+	server := newSingleFileUpdateServer(t, "/reviewer.md", "# reviewer\n")
+	defer server.Close()
+
+	entrypoint := filepath.Join(root, "AGENTS.md")
+	original := "Intro\n\n<!-- ctxpm:begin agent=generic -->\nold instructions\n"
+	if err := os.WriteFile(entrypoint, []byte(original), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version: 2,
+		Project: manifest.Project{Name: "sample"},
+		Agents:  []string{"generic"},
+		Dependencies: []manifest.Resource{
+			{
+				Name:   "reviewer",
+				Type:   "rule",
+				Layout: manifest.LayoutFile,
+				Path:   ".ctxpm/dependencies/rules/reviewer.md",
+				Entry:  "reviewer.md",
+				Source: &manifest.Source{
+					Type:  "url",
+					URL:   server.URL + "/reviewer.md",
+					Entry: "reviewer.md",
+				},
+				Version:       "sha256:stale",
+				Compatibility: []string{".agents/rules/reviewer.md"},
+			},
+		},
+		Packages: []manifest.Resource{},
+		Entrypoints: map[string]manifest.Entrypoint{
+			"generic": {File: "AGENTS.md", Mode: "managed"},
+		},
+	})
+
+	app := New(root)
+	_, err := app.Update(context.Background(), UpdateOptions{Names: []string{"reviewer"}})
+	if err == nil {
+		t.Fatal("Update() error = nil, want damaged block error")
+	}
+	if !strings.Contains(err.Error(), "managed ctxpm block is damaged") {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if got := readFileForTest(t, entrypoint); got != original {
+		t.Fatalf("damaged entrypoint should remain unchanged\n--- got ---\n%s\n--- want ---\n%s", got, original)
+	}
+}
+
+func newSingleFileUpdateServer(t *testing.T, path, content string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != path {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(content))
+	}))
+}
+
 func writeManifestForTest(t *testing.T, root string, m *manifest.Manifest) {
 	t.Helper()
 	if m.Dependencies == nil {
