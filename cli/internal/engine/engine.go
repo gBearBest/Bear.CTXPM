@@ -207,9 +207,7 @@ func (a *App) Add(ctx context.Context, opts AddOptions) (*AddResult, error) {
 		if installed.Version != "" {
 			detected.Resource.Version = installed.Version
 		}
-		m.Dependencies = append(m.Dependencies, detected.Resource)
-		sortResources(m.Dependencies)
-		if _, err := manifest.Save(a.Root, m); err != nil {
+		if _, err := manifest.AddDependency(a.Root, detected.Resource); err != nil {
 			return nil, err
 		}
 	} else {
@@ -385,6 +383,7 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 		return nil, err
 	}
 	actions := []InstallAction{}
+	versionUpdates := map[string]string{}
 	for i := range m.Dependencies {
 		dep := &m.Dependencies[i]
 		if opts.Type != "" && dep.Type != opts.Type {
@@ -401,11 +400,15 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 		if err != nil {
 			return nil, err
 		}
+		previousVersion := dep.Version
 		dep.Version = installed.Version
+		if previousVersion != dep.Version {
+			versionUpdates[dep.Name] = dep.Version
+		}
 		actions = append(actions, InstallAction{Name: dep.Name, Status: installed.Status, Version: dep.Version})
 	}
-	if !opts.DryRun {
-		if _, err := manifest.Save(a.Root, m); err != nil {
+	if !opts.DryRun && len(versionUpdates) > 0 {
+		if _, err := manifest.UpdateResourceVersions(a.Root, versionUpdates); err != nil {
 			return nil, err
 		}
 	}
@@ -607,6 +610,7 @@ func (a *App) Update(ctx context.Context, opts UpdateOptions) (*UpdateResult, er
 	}
 
 	result := &UpdateResult{Status: ternary(opts.DryRun, "dry_run", "applied")}
+	versionUpdates := map[string]string{}
 	for i := range m.Dependencies {
 		dep := &m.Dependencies[i]
 		if !targets[dep.Name] {
@@ -635,6 +639,9 @@ func (a *App) Update(ctx context.Context, opts UpdateOptions) (*UpdateResult, er
 			}
 			current := dep.Version
 			dep.Version = installed.Version
+			if current != dep.Version {
+				versionUpdates[dep.Name] = dep.Version
+			}
 			result.Applied = append(result.Applied, UpdateAction{
 				Name:           dep.Name,
 				Status:         "updated",
@@ -645,8 +652,8 @@ func (a *App) Update(ctx context.Context, opts UpdateOptions) (*UpdateResult, er
 			result.Skipped = append(result.Skipped, UpdateAction{Name: dep.Name, Status: updateInfo.Status, Reason: updateInfo.Reason})
 		}
 	}
-	if !opts.DryRun {
-		if _, err := manifest.Save(a.Root, m); err != nil {
+	if !opts.DryRun && len(versionUpdates) > 0 {
+		if _, err := manifest.UpdateResourceVersions(a.Root, versionUpdates); err != nil {
 			return nil, err
 		}
 	}
@@ -673,7 +680,7 @@ func (a *App) Remove(opts RemoveOptions) (*RemoveResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	for idx, dep := range m.Dependencies {
+	for _, dep := range m.Dependencies {
 		if dep.Name != opts.Name {
 			continue
 		}
@@ -682,13 +689,12 @@ func (a *App) Remove(opts RemoveOptions) (*RemoveResult, error) {
 				return nil, err
 			}
 		}
-		m.Dependencies = append(m.Dependencies[:idx], m.Dependencies[idx+1:]...)
-		if _, err := manifest.Save(a.Root, m); err != nil {
+		if _, err := manifest.RemoveDependency(a.Root, dep.Name); err != nil {
 			return nil, err
 		}
 		return &RemoveResult{Status: ternary(opts.DeleteFiles, "removed_and_deleted", "removed"), Kind: "dependency", Name: dep.Name}, nil
 	}
-	for idx, pkg := range m.Packages {
+	for _, pkg := range m.Packages {
 		if pkg.Name != opts.Name {
 			continue
 		}
@@ -697,8 +703,7 @@ func (a *App) Remove(opts RemoveOptions) (*RemoveResult, error) {
 				return nil, err
 			}
 		}
-		m.Packages = append(m.Packages[:idx], m.Packages[idx+1:]...)
-		if _, err := manifest.Save(a.Root, m); err != nil {
+		if _, err := manifest.RemovePackage(a.Root, pkg.Name); err != nil {
 			return nil, err
 		}
 		return &RemoveResult{Status: ternary(opts.DeleteFiles, "removed_and_deleted", "removed"), Kind: "package", Name: pkg.Name}, nil
