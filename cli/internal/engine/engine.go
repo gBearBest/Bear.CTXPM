@@ -129,16 +129,25 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 	entrypointFile := filepath.Join(a.Root, manifest.EntrypointFile(opts.Agent))
 	files = append(files, entrypointFile)
 	if !opts.DryRun {
-		if _, err := os.Stat(entrypointFile); errors.Is(err, os.ErrNotExist) || opts.Force {
-			if err := os.WriteFile(entrypointFile, []byte(manifest.ManagedEntrypoint(opts.Agent)), 0o644); err != nil {
-				return nil, err
-			}
+		if err := ensureManagedEntrypoint(entrypointFile, opts.Agent); err != nil {
+			return nil, err
 		}
 	}
+
+	ctxpmResource := bundledCtxpmResource(m.Agents)
+	upsertManagedDependency(&m.Dependencies, ctxpmResource)
 
 	gitignorePath := filepath.Join(a.Root, ".gitignore")
 	files = append(files, gitignorePath)
 	if !opts.DryRun {
+		created, createdFiles, err := ensureBundledCtxpm(a.Root, m.Agents)
+		if err != nil {
+			return nil, err
+		}
+		ctxpmResource = created
+		upsertManagedDependency(&m.Dependencies, ctxpmResource)
+		files = append(files, createdFiles...)
+
 		if err := ensureGitignoreRules(gitignorePath, []string{".ctxpm/dependencies/", ".ctxpm/state/"}); err != nil {
 			return nil, err
 		}
@@ -933,6 +942,16 @@ func localStatus(root string, resource manifest.Resource) string {
 		}
 	}
 	return "installed"
+}
+
+func upsertManagedDependency(resources *[]manifest.Resource, resource manifest.Resource) {
+	for i := range *resources {
+		if (*resources)[i].Name == resource.Name {
+			(*resources)[i] = resource
+			return
+		}
+	}
+	*resources = append(*resources, resource)
 }
 
 func sortResources(resources []manifest.Resource) {

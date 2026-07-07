@@ -73,6 +73,54 @@ func TestInitCreatesV2Manifest(t *testing.T) {
 	if loaded.Version != manifest.ManifestVersion2 {
 		t.Fatalf("manifest version = %d", loaded.Version)
 	}
+	if len(loaded.Dependencies) != 1 {
+		t.Fatalf("dependencies = %d, want 1", len(loaded.Dependencies))
+	}
+	ctxpm := loaded.Dependencies[0]
+	if ctxpm.Name != "ctxpm" || ctxpm.Layout != manifest.LayoutDir || ctxpm.Entry != "SKILL.md" {
+		t.Fatalf("ctxpm dependency = %+v", ctxpm)
+	}
+	if ctxpm.Source == nil || ctxpm.Source.Path != "resources/skills/ctxpm" || ctxpm.Source.Entry != "SKILL.md" {
+		t.Fatalf("ctxpm source = %+v", ctxpm.Source)
+	}
+	if got := readFileForTest(t, filepath.Join(root, "AGENTS.md")); got != manifest.ManagedEntrypoint("generic") {
+		t.Fatalf("AGENTS.md mismatch\n--- got ---\n%s\n--- want ---\n%s", got, manifest.ManagedEntrypoint("generic"))
+	}
+	for _, relative := range []string{
+		".ctxpm/dependencies/skills/ctxpm/SKILL.md",
+		".ctxpm/dependencies/skills/ctxpm/ctxpm-yaml.md",
+		".ctxpm/dependencies/skills/ctxpm/cli/ctxpm",
+	} {
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(relative))); err != nil {
+			t.Fatalf("expected %s to exist: %v", relative, err)
+		}
+	}
+	target, err := os.Readlink(filepath.Join(root, ".agents/skills/ctxpm"))
+	if err != nil {
+		t.Fatalf("Readlink() error = %v", err)
+	}
+	if target != "../../.ctxpm/dependencies/skills/ctxpm" {
+		t.Fatalf("compat symlink = %q", target)
+	}
+}
+
+func TestInitReplacesManagedBlockOnly(t *testing.T) {
+	root := t.TempDir()
+	entrypoint := filepath.Join(root, "AGENTS.md")
+	original := "Intro\n\n<!-- ctxpm:begin agent=generic -->\noutdated\n<!-- ctxpm:end -->\n\nFooter\n"
+	if err := os.WriteFile(entrypoint, []byte(original), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	app := New(root)
+	if _, err := app.Init(InitOptions{Agent: "generic"}); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	got := readFileForTest(t, entrypoint)
+	want := "Intro\n\n" + manifest.ManagedEntrypoint("generic") + "\n\nFooter\n"
+	if got != want {
+		t.Fatalf("entrypoint mismatch\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
 }
 
 func TestValidateReportsMissingPackageCompatibility(t *testing.T) {
@@ -301,4 +349,13 @@ func containsIssue(issues []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func readFileForTest(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", path, err)
+	}
+	return string(data)
 }
