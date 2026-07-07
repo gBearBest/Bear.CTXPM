@@ -717,6 +717,103 @@ func TestValidateReportsMissingPackageCompatibility(t *testing.T) {
 	}
 }
 
+func TestDetectFindsUnmanagedCompatibilityResource(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".agents", "skills", "reviewer"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".agents", "skills", "reviewer", "SKILL.md"), []byte("review carefully\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version:      2,
+		Project:      manifest.Project{Name: "sample"},
+		Agents:       []string{"generic"},
+		Dependencies: []manifest.Resource{},
+		Packages:     []manifest.Resource{},
+	})
+
+	app := New(root)
+	result, err := app.Detect()
+	if err != nil {
+		t.Fatalf("Detect() error = %v", err)
+	}
+	if result.Status != "migration_candidates_found" {
+		t.Fatalf("Detect() status = %q", result.Status)
+	}
+	if len(result.Candidates) != 1 {
+		t.Fatalf("Detect() candidates = %+v", result.Candidates)
+	}
+	candidate := result.Candidates[0]
+	if candidate.OriginalPath != ".agents/skills/reviewer" {
+		t.Fatalf("candidate original = %q", candidate.OriginalPath)
+	}
+	if candidate.CanonicalPath != ".ctxpm/packages/skills/reviewer" {
+		t.Fatalf("candidate canonical = %q", candidate.CanonicalPath)
+	}
+}
+
+func TestMigrateMovesCompatibilityResourceAndValidates(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".agents", "skills", "reviewer"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".agents", "skills", "reviewer", "SKILL.md"), []byte("review carefully\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version:      2,
+		Project:      manifest.Project{Name: "sample"},
+		Agents:       []string{"generic"},
+		Dependencies: []manifest.Resource{},
+		Packages:     []manifest.Resource{},
+	})
+
+	app := New(root)
+	result, err := app.Migrate(MigrateOptions{Paths: []string{".agents/skills/reviewer"}})
+	if err != nil {
+		t.Fatalf("Migrate() error = %v", err)
+	}
+	if result.Status != "applied" {
+		t.Fatalf("Migrate() status = %q", result.Status)
+	}
+	if !result.Validation.OK {
+		t.Fatalf("Migrate() validation = %+v", result.Validation)
+	}
+
+	loaded, _, err := manifest.Load(root)
+	if err != nil {
+		t.Fatalf("manifest.Load() error = %v", err)
+	}
+	found := false
+	for _, pkg := range loaded.Packages {
+		if pkg.Name != "reviewer" {
+			continue
+		}
+		found = true
+		if pkg.Path != ".ctxpm/packages/skills/reviewer" {
+			t.Fatalf("package path = %q", pkg.Path)
+		}
+		if !hasString(pkg.Compatibility, ".agents/skills/reviewer") {
+			t.Fatalf("package compatibility = %v", pkg.Compatibility)
+		}
+		break
+	}
+	if !found {
+		t.Fatalf("packages = %+v", loaded.Packages)
+	}
+	target, err := os.Readlink(filepath.Join(root, ".agents", "skills", "reviewer"))
+	if err != nil {
+		t.Fatalf("Readlink() error = %v", err)
+	}
+	if target != "../../.ctxpm/packages/skills/reviewer" {
+		t.Fatalf("compat symlink = %q", target)
+	}
+	if got := readFileForTest(t, filepath.Join(root, ".ctxpm/packages/skills/reviewer", "SKILL.md")); got != "review carefully\n" {
+		t.Fatalf("migrated content mismatch: %q", got)
+	}
+}
+
 func hasString(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {

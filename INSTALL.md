@@ -72,12 +72,16 @@ However, when the official companion `ctxpm` CLI is available, install or prepar
 
 - `ctxpm init`
 - `ctxpm install`
+- `ctxpm detect`
+- `ctxpm migrate`
 - `ctxpm add`
 - `ctxpm list`
 - `ctxpm check-updates`
 - `ctxpm update`
 - `ctxpm remove`
 - `ctxpm validate`
+
+During normal AI work, run `ctxpm detect` more frequently than `ctxpm check-updates` so newly added AI resources outside ctxpm-managed roots are caught early, then ask the user before migrating them and verify the result with `ctxpm validate`.
 
 During installation, do not make the AI manually recreate deterministic scaffolding that the project-local `ctxpm` CLI can generate and verify on its own. Use the local CLI first for fixed bootstrap work, then let the AI inspect the output, validate the resulting state, and handle unresolved ownership or migration decisions.
 

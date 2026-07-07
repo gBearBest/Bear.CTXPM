@@ -81,6 +81,10 @@ func run(args []string) error {
 		return runValidate(app, args[1:])
 	case "install":
 		return runInstall(app, args[1:])
+	case "detect":
+		return runDetect(app, args[1:])
+	case "migrate":
+		return runMigrate(app, args[1:])
 	case "check-updates":
 		return runCheckUpdates(app, args[1:])
 	case "update":
@@ -228,6 +232,47 @@ func runInstall(app *engine.App, args []string) error {
 	return printMaybeJSON(result, *jsonOutput)
 }
 
+func runDetect(app *engine.App, args []string) error {
+	fs := flag.NewFlagSet("detect", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	jsonOutput := fs.Bool("json", false, "Emit JSON output")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	result, err := app.Detect()
+	if err != nil {
+		return err
+	}
+	return printMaybeJSON(result, *jsonOutput)
+}
+
+func runMigrate(app *engine.App, args []string) error {
+	args = reorderArgs(args, map[string]bool{
+		"--path": true,
+	})
+	fs := flag.NewFlagSet("migrate", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	all := fs.Bool("all", false, "Migrate every detected candidate")
+	dryRun := fs.Bool("dry-run", false, "Report the work without writing files")
+	jsonOutput := fs.Bool("json", false, "Emit JSON output")
+	var paths stringListFlag
+	fs.Var(&paths, "path", "Original path or resource name of a detected candidate; repeat to migrate multiple resources")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	result, err := app.Migrate(engine.MigrateOptions{
+		Paths:  append([]string(nil), append([]string(paths), fs.Args()...)...),
+		All:    *all,
+		DryRun: *dryRun,
+	})
+	if err != nil {
+		return err
+	}
+	return printMaybeJSON(result, *jsonOutput)
+}
+
 func runCheckUpdates(app *engine.App, args []string) error {
 	fs := flag.NewFlagSet("check-updates", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -324,6 +369,8 @@ func printHelp(w *os.File) {
 		"  version        Print CLI version information",
 		"  init           Initialize the current project as a Bear.CTXPM project",
 		"  add            Add and install an external AI resource from a URL",
+		"  detect         Detect unmanaged AI resources that may need migration",
+		"  migrate        Migrate detected AI resources into ctxpm-managed roots",
 		"  install        Install dependencies and repair compatibility links",
 		"  list           List dependencies and packages",
 		"  validate       Validate ctxpm.yaml and local paths",

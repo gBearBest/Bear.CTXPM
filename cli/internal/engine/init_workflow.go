@@ -37,6 +37,11 @@ type discoveredResource struct {
 	requiresMigration bool
 }
 
+type migrationDiscoveryPlan struct {
+	candidates []discoveredResource
+	unresolved []string
+}
+
 func detectInitAgent(root string, requested string, m *manifest.Manifest) initDiscovery {
 	agent := strings.TrimSpace(requested)
 	if agent != "" {
@@ -159,6 +164,46 @@ func scanAndMigrateResources(root string, m *manifest.Manifest, projectName stri
 	return plan, nil
 }
 
+func collectMigrationCandidates(root string, m *manifest.Manifest, projectName string) (*migrationDiscoveryPlan, error) {
+	topLevelEntries, err := listTopLevelEntries(root)
+	if err != nil {
+		return nil, err
+	}
+	projectHints := buildProjectHints(projectName, topLevelEntries)
+	candidates, err := discoverInitResources(root, projectHints)
+	if err != nil {
+		return nil, err
+	}
+	compatibilityCandidates, err := discoverCompatibilityResources(root, projectHints)
+	if err != nil {
+		return nil, err
+	}
+	candidates = append(candidates, compatibilityCandidates...)
+	sortDiscoveredResources(candidates)
+	candidates = dedupeDiscoveredResources(candidates)
+
+	plan := &migrationDiscoveryPlan{}
+	for _, candidate := range candidates {
+		if !candidate.requiresMigration {
+			continue
+		}
+		if m.HasResource(candidate.resource.Name) {
+			plan.unresolved = append(plan.unresolved, fmt.Sprintf("%s (%s): resource name already exists in ctxpm.yaml", candidate.original, candidate.resource.Name))
+			continue
+		}
+		if resourcePathExists(root, candidate.resource.Path) {
+			plan.unresolved = append(plan.unresolved, fmt.Sprintf("%s: canonical path %s already exists", candidate.original, candidate.resource.Path))
+			continue
+		}
+		candidate.resource.Compatibility = compatibilityPaths(m.Agents, candidate.resource)
+		candidate.resource.Compatibility = dedupe(append(candidate.resource.Compatibility, candidate.original))
+		plan.candidates = append(plan.candidates, candidate)
+	}
+	sortDiscoveredResources(plan.candidates)
+	plan.unresolved = dedupe(plan.unresolved)
+	return plan, nil
+}
+
 func (p *initResourcePlan) recordCandidate(candidate discoveredResource, migrated bool) {
 	switch candidate.kind {
 	case "dependency":
@@ -182,7 +227,7 @@ func discoverInitResources(root string, projectHints []string) ([]discoveredReso
 		"prompts": "prompt",
 		"mcp":     "mcp",
 	} {
-		discovered, err := discoverTypedResourceDir(root, relDir, resourceType, true, projectHints, true)
+		discovered, err := discoverTypedResourceDir(root, relDir, resourceType, true, projectHints, true, false)
 		if err != nil {
 			return nil, err
 		}
@@ -195,7 +240,7 @@ func discoverInitResources(root string, projectHints []string) ([]discoveredReso
 		"ai/prompts": "prompt",
 		"ai/mcp":     "mcp",
 	} {
-		discovered, err := discoverTypedResourceDir(root, relDir, resourceType, true, projectHints, true)
+		discovered, err := discoverTypedResourceDir(root, relDir, resourceType, true, projectHints, true, false)
 		if err != nil {
 			return nil, err
 		}
@@ -215,7 +260,21 @@ func discoverInitResources(root string, projectHints []string) ([]discoveredReso
 	return dedupeDiscoveredResources(candidates), nil
 }
 
-func discoverTypedResourceDir(root, relDir, resourceType string, packageOwned bool, projectHints []string, requiresMigration bool) ([]discoveredResource, error) {
+func discoverCompatibilityResources(root string, projectHints []string) ([]discoveredResource, error) {
+	candidates := []discoveredResource{}
+	for _, relDir := range []string{".agents", ".claude", ".antigravity"} {
+		for _, resourceType := range []string{"skill", "rule", "spec", "prompt", "mcp"} {
+			discovered, err := discoverTypedResourceDir(root, filepath.ToSlash(filepath.Join(relDir, manifest.TypeDir(resourceType))), resourceType, true, projectHints, true, true)
+			if err != nil {
+				return nil, err
+			}
+			candidates = append(candidates, discovered...)
+		}
+	}
+	return candidates, nil
+}
+
+func discoverTypedResourceDir(root, relDir, resourceType string, packageOwned bool, projectHints []string, requiresMigration bool, allowCompatibilityRoots bool) ([]discoveredResource, error) {
 	absDir := filepath.Join(root, filepath.FromSlash(relDir))
 	entries, err := os.ReadDir(absDir)
 	if err != nil {
@@ -231,7 +290,7 @@ func discoverTypedResourceDir(root, relDir, resourceType string, packageOwned bo
 		}
 		entryRel := filepath.ToSlash(filepath.Join(relDir, entry.Name()))
 		entryAbs := filepath.Join(absDir, entry.Name())
-		if ignoredInitPath(entryRel) {
+		if ignoredInitPath(entryRel) && !(allowCompatibilityRoots && compatibilityDiscoveryPath(entryRel)) {
 			continue
 		}
 		info, err := os.Lstat(entryAbs)
@@ -537,6 +596,13 @@ func ignoredInitPath(rel string) bool {
 	rel = filepath.ToSlash(rel)
 	return strings.HasPrefix(rel, ".ctxpm/") ||
 		strings.HasPrefix(rel, ".agents/") ||
+		strings.HasPrefix(rel, ".claude/") ||
+		strings.HasPrefix(rel, ".antigravity/")
+}
+
+func compatibilityDiscoveryPath(rel string) bool {
+	rel = filepath.ToSlash(rel)
+	return strings.HasPrefix(rel, ".agents/") ||
 		strings.HasPrefix(rel, ".claude/") ||
 		strings.HasPrefix(rel, ".antigravity/")
 }

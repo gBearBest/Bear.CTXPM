@@ -80,12 +80,16 @@ For multi-file URL or archive resources, compute the version from the full direc
 When the companion CLI is available, prefer it for routine lifecycle operations:
 
 - `ctxpm install`
+- `ctxpm detect`
+- `ctxpm migrate`
 - `ctxpm add`
 - `ctxpm list`
 - `ctxpm validate`
 - `ctxpm check-updates`
 - `ctxpm update`
 - `ctxpm remove`
+
+Run `ctxpm detect` on a shorter cadence than `ctxpm check-updates` so newly added AI resources in non-ctxpm locations are caught early, then migrate them and validate the result after user confirmation.
 
 If the CLI is unavailable, follow the same protocol manually instead of inventing a partial workflow.
 
