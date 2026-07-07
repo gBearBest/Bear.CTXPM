@@ -18,7 +18,7 @@ dependencies:
       url: https://github.com/gBearBest/Bear.CTXPM
       path: resources/skills/ctxpm
       entry: SKILL.md
-    version: c9bcad3c861fa238789bdcc2a66776e69a77e1ed
+    version: 1b194b5766c46bf6f1b39a76b446170a7e7c244e
     compatibility:
       - .agents/skills/ctxpm
 packages:

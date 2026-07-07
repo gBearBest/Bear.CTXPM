@@ -143,6 +143,7 @@ entrypoints:
 3. Record `layout`, `path`, `entry`, and any required `compatibility` paths.
 4. For dependencies, record `source` and `version`.
 5. Repair compatibility exposure paths.
+6. Ensure `.gitignore` includes safe ignore rules for repaired compatibility paths.
 
 ### Validate
 

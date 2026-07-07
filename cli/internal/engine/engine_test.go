@@ -60,6 +60,44 @@ func TestInstallRepairsPackageCompatibility(t *testing.T) {
 	}
 }
 
+func TestInstallUpdatesGitignoreForCompatibilityDirectories(t *testing.T) {
+	root := t.TempDir()
+	packagePath := ".ctxpm/packages/rules/project-review.md"
+	if err := os.MkdirAll(filepath.Join(root, ".ctxpm/packages/rules"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(packagePath)), []byte("project review\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version: 2,
+		Project: manifest.Project{Name: "sample"},
+		Agents:  []string{"generic"},
+		Packages: []manifest.Resource{
+			{
+				Name:          "project-review",
+				Type:          "rule",
+				Layout:        manifest.LayoutFile,
+				Path:          packagePath,
+				Entry:         "project-review.md",
+				Compatibility: []string{".agents/rules/project-review.md"},
+			},
+		},
+	})
+
+	app := New(root)
+	if _, err := app.Install(context.Background(), InstallOptions{Only: "project-review"}); err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+
+	gitignore := readFileForTest(t, filepath.Join(root, ".gitignore"))
+	for _, rule := range []string{".ctxpm/dependencies/", ".ctxpm/state/", ".agents/rules/"} {
+		if !strings.Contains(gitignore, rule+"\n") {
+			t.Fatalf(".gitignore missing %q:\n%s", rule, gitignore)
+		}
+	}
+}
+
 func TestInitCreatesV2Manifest(t *testing.T) {
 	root := t.TempDir()
 	app := New(root)
@@ -114,6 +152,44 @@ func TestInitCreatesV2Manifest(t *testing.T) {
 	}
 	if target != "../../.ctxpm/dependencies/skills/ctxpm" {
 		t.Fatalf("compat symlink = %q", target)
+	}
+}
+
+func TestInitUpdatesGitignoreForExistingCompatibilityPaths(t *testing.T) {
+	root := t.TempDir()
+	packagePath := ".ctxpm/packages/rules/project-review.md"
+	if err := os.MkdirAll(filepath.Join(root, ".ctxpm/packages/rules"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(packagePath)), []byte("project review\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version: 2,
+		Project: manifest.Project{Name: "sample"},
+		Agents:  []string{"generic"},
+		Packages: []manifest.Resource{
+			{
+				Name:          "project-review",
+				Type:          "rule",
+				Layout:        manifest.LayoutFile,
+				Path:          packagePath,
+				Entry:         "project-review.md",
+				Compatibility: []string{".agents/rules/project-review.md"},
+			},
+		},
+	})
+
+	app := New(root)
+	if _, err := app.Init(InitOptions{Agent: "generic"}); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+
+	gitignore := readFileForTest(t, filepath.Join(root, ".gitignore"))
+	for _, rule := range []string{".ctxpm/dependencies/", ".ctxpm/state/", ".agents/rules/"} {
+		if !strings.Contains(gitignore, rule+"\n") {
+			t.Fatalf(".gitignore missing %q:\n%s", rule, gitignore)
+		}
 	}
 }
 

@@ -216,7 +216,6 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 
 	gitignorePath := filepath.Join(a.Root, ".gitignore")
 	files = append(files, gitignorePath)
-	gitignoreRules := dedupe(append([]string{".ctxpm/dependencies/", ".ctxpm/state/"}, resourcePlan.gitignoreRules...))
 	gitignoreUpdated := false
 	ctxpmStatus := "planned"
 	ctxpmYAMLStatus := "planned"
@@ -234,6 +233,11 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 		localCLIStatus = bundled.LocalCLIStatus
 		resourcePlan.warnings = append(resourcePlan.warnings, bundled.Warnings...)
 
+		gitignoreRules := dedupe(append(
+			[]string{".ctxpm/dependencies/", ".ctxpm/state/"},
+			compatibilityGitignoreRules(m.Dependencies)...,
+		))
+		gitignoreRules = dedupe(append(gitignoreRules, compatibilityGitignoreRules(m.Packages)...))
 		updated, err := ensureGitignoreRules(gitignorePath, gitignoreRules)
 		if err != nil {
 			return nil, err
@@ -518,6 +522,7 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 	}
 	actions := []InstallAction{}
 	versionUpdates := map[string]string{}
+	installedResources := []manifest.Resource{}
 	for i := range m.Dependencies {
 		dep := &m.Dependencies[i]
 		if opts.Type != "" && dep.Type != opts.Type {
@@ -540,6 +545,7 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 			versionUpdates[dep.Name] = dep.Version
 		}
 		actions = append(actions, InstallAction{Kind: "dependency", Name: dep.Name, Status: installed.Status, Version: dep.Version})
+		installedResources = append(installedResources, *dep)
 	}
 	for i := range m.Packages {
 		pkg := &m.Packages[i]
@@ -560,9 +566,19 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 			return nil, err
 		}
 		actions = append(actions, InstallAction{Kind: "package", Name: pkg.Name, Status: "linked"})
+		installedResources = append(installedResources, *pkg)
 	}
 	if !opts.DryRun && len(versionUpdates) > 0 {
 		if _, err := manifest.UpdateResourceVersions(a.Root, versionUpdates); err != nil {
+			return nil, err
+		}
+	}
+	if !opts.DryRun && len(installedResources) > 0 {
+		gitignoreRules := dedupe(append(
+			[]string{".ctxpm/dependencies/", ".ctxpm/state/"},
+			compatibilityGitignoreRules(installedResources)...,
+		))
+		if _, err := ensureGitignoreRules(filepath.Join(a.Root, ".gitignore"), gitignoreRules); err != nil {
 			return nil, err
 		}
 	}
@@ -1103,6 +1119,14 @@ func ensureGitignoreRules(path string, rules []string) (bool, error) {
 		return false, nil
 	}
 	return updated, os.WriteFile(path, []byte(builder.String()), 0o644)
+}
+
+func compatibilityGitignoreRules(resources []manifest.Resource) []string {
+	rules := []string{}
+	for _, resource := range resources {
+		rules = append(rules, compatibilityIgnoreRules(resource)...)
+	}
+	return dedupe(rules)
 }
 
 type cachedCheckState struct {

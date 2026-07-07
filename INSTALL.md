@@ -590,6 +590,7 @@ Use this consolidation strategy:
 7. If a compatibility path or compatibility directory was tracked by Git, try to remove it from the index with `git rm --cached <path>` after confirming the migrated canonical copy exists under `.ctxpm/`.
 8. Do not remove the canonical `.ctxpm/packages/` copy from Git when it is a project-local `package`.
 9. Keep external `dependency` content out of Git by ignoring `.ctxpm/dependencies/`.
+10. `ctxpm install` should not only repair compatibility symlinks; it should also append any missing compatibility ignore rules needed by those paths.
 
 ### 5.11 Report Results
 
