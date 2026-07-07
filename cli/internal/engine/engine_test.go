@@ -63,8 +63,15 @@ func TestInstallRepairsPackageCompatibility(t *testing.T) {
 func TestInitCreatesV2Manifest(t *testing.T) {
 	root := t.TempDir()
 	app := New(root)
-	if _, err := app.Init(InitOptions{Agent: "generic"}); err != nil {
+	result, err := app.Init(InitOptions{Agent: "generic"})
+	if err != nil {
 		t.Fatalf("Init() error = %v", err)
+	}
+	if result.Agent != "generic" || result.EntrypointFile != "AGENTS.md" {
+		t.Fatalf("Init() result = %+v", result)
+	}
+	if result.LocalCLIStatus == "" {
+		t.Fatalf("LocalCLIStatus = empty")
 	}
 	loaded, _, err := manifest.Load(root)
 	if err != nil {
@@ -110,6 +117,33 @@ func TestInitCreatesV2Manifest(t *testing.T) {
 	}
 }
 
+func TestInitDefaultsToGenericWhenAgentOmitted(t *testing.T) {
+	root := t.TempDir()
+	app := New(root)
+	result, err := app.Init(InitOptions{})
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	if result.Agent != "generic" || result.EntrypointFile != "AGENTS.md" {
+		t.Fatalf("Init() result = %+v", result)
+	}
+}
+
+func TestInitDetectsExistingClaudeEntrypointWhenAgentOmitted(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "CLAUDE.md"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	app := New(root)
+	result, err := app.Init(InitOptions{})
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	if result.Agent != "claude-code" || result.EntrypointFile != "CLAUDE.md" {
+		t.Fatalf("Init() result = %+v", result)
+	}
+}
+
 func TestBundledCtxpmAssetsStayInSyncWithResources(t *testing.T) {
 	skillResource := readRepoFileForTest(t, "../../../resources/skills/ctxpm/SKILL.md")
 	yamlResource := readRepoFileForTest(t, "../../../resources/skills/ctxpm/ctxpm-yaml.md")
@@ -140,6 +174,172 @@ func TestInitReplacesManagedBlockOnly(t *testing.T) {
 	}
 }
 
+func TestInitReportsDamagedManagedBlockWithoutForce(t *testing.T) {
+	root := t.TempDir()
+	entrypoint := filepath.Join(root, "AGENTS.md")
+	original := "Intro\n\n<!-- ctxpm:begin agent=generic -->\noutdated\n"
+	if err := os.WriteFile(entrypoint, []byte(original), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	app := New(root)
+	_, err := app.Init(InitOptions{Agent: "generic"})
+	if err == nil {
+		t.Fatal("Init() error = nil, want damaged block error")
+	}
+	if !strings.Contains(err.Error(), "managed ctxpm block is damaged") {
+		t.Fatalf("Init() error = %v", err)
+	}
+	if got := readFileForTest(t, entrypoint); got != original {
+		t.Fatalf("damaged entrypoint should remain unchanged\n--- got ---\n%s\n--- want ---\n%s", got, original)
+	}
+}
+
+func TestInitForceRepairsDamagedManagedBlock(t *testing.T) {
+	root := t.TempDir()
+	entrypoint := filepath.Join(root, "AGENTS.md")
+	if err := os.WriteFile(entrypoint, []byte("Intro\n\n<!-- ctxpm:begin agent=generic -->\noutdated\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	app := New(root)
+	if _, err := app.Init(InitOptions{Agent: "generic", Force: true}); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	got := readFileForTest(t, entrypoint)
+	want := "Intro\n\n" + manifest.ManagedEntrypoint("generic") + "\n"
+	if got != want {
+		t.Fatalf("entrypoint mismatch\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+func TestInitRepairsExistingManifestWithoutForce(t *testing.T) {
+	root := t.TempDir()
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version:      1,
+		Project:      manifest.Project{Name: "sample"},
+		Agents:       []string{"generic"},
+		Dependencies: []manifest.Resource{},
+		Packages:     []manifest.Resource{},
+		Entrypoints: map[string]manifest.Entrypoint{
+			"generic": {File: "AGENTS.md", Mode: "managed"},
+		},
+	})
+
+	app := New(root)
+	if _, err := app.Init(InitOptions{Agent: "generic"}); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+
+	loaded, _, err := manifest.Load(root)
+	if err != nil {
+		t.Fatalf("manifest.Load() error = %v", err)
+	}
+	if loaded.Version != manifest.ManifestVersion2 {
+		t.Fatalf("manifest version = %d", loaded.Version)
+	}
+	if loaded.Project.Name != "sample" {
+		t.Fatalf("project.name = %q", loaded.Project.Name)
+	}
+	if len(loaded.Dependencies) != 1 || loaded.Dependencies[0].Name != "ctxpm" {
+		t.Fatalf("dependencies = %+v", loaded.Dependencies)
+	}
+	for _, relative := range []string{
+		"AGENTS.md",
+		".ctxpm/dependencies/skills/ctxpm/SKILL.md",
+		".ctxpm/dependencies/skills/ctxpm/ctxpm-yaml.md",
+		".ctxpm/dependencies/skills/ctxpm/cli/ctxpm",
+		".agents/skills/ctxpm",
+	} {
+		if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(relative))); err != nil {
+			t.Fatalf("expected %s to exist: %v", relative, err)
+		}
+	}
+}
+
+func TestInitForceSyncsAgentsAndCompatibility(t *testing.T) {
+	root := t.TempDir()
+	app := New(root)
+	if _, err := app.Init(InitOptions{Agent: "generic"}); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	if _, err := app.Init(InitOptions{Agent: "claude-code", Force: true}); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+
+	loaded, _, err := manifest.Load(root)
+	if err != nil {
+		t.Fatalf("manifest.Load() error = %v", err)
+	}
+	if !hasString(loaded.Agents, "generic") || !hasString(loaded.Agents, "claude-code") {
+		t.Fatalf("agents = %v", loaded.Agents)
+	}
+	if _, ok := loaded.Entrypoints["claude-code"]; !ok {
+		t.Fatalf("entrypoints = %+v", loaded.Entrypoints)
+	}
+	ctxpm := loaded.Dependencies[0]
+	if !hasString(ctxpm.Compatibility, ".agents/skills/ctxpm") || !hasString(ctxpm.Compatibility, ".claude/skills/ctxpm") {
+		t.Fatalf("compatibility = %v", ctxpm.Compatibility)
+	}
+	for _, relative := range []string{".agents/skills/ctxpm", ".claude/skills/ctxpm", "AGENTS.md", "CLAUDE.md"} {
+		if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(relative))); err != nil {
+			t.Fatalf("expected %s to exist: %v", relative, err)
+		}
+	}
+}
+
+func TestInitMigratesExistingSkillDirectoryIntoPackages(t *testing.T) {
+	root := t.TempDir()
+	skillRoot := filepath.Join(root, "skills", "reviewer")
+	if err := os.MkdirAll(skillRoot, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillRoot, "SKILL.md"), []byte("Use README.md in this project.\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	app := New(root)
+	result, err := app.Init(InitOptions{Agent: "generic"})
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	if !hasString(result.PackagesCreated, "reviewer") {
+		t.Fatalf("PackagesCreated = %v", result.PackagesCreated)
+	}
+	if !hasString(result.MigratedResources, "skills/reviewer") {
+		t.Fatalf("MigratedResources = %v", result.MigratedResources)
+	}
+
+	loaded, _, err := manifest.Load(root)
+	if err != nil {
+		t.Fatalf("manifest.Load() error = %v", err)
+	}
+	var pkg manifest.Resource
+	found := false
+	for _, candidate := range loaded.Packages {
+		if candidate.Name == "reviewer" {
+			pkg = candidate
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("packages = %+v", loaded.Packages)
+	}
+	if pkg.Path != ".ctxpm/packages/skills/reviewer" {
+		t.Fatalf("package path = %q", pkg.Path)
+	}
+	if !hasString(pkg.Compatibility, "skills/reviewer") || !hasString(pkg.Compatibility, ".agents/skills/reviewer") {
+		t.Fatalf("package compatibility = %v", pkg.Compatibility)
+	}
+	target, err := os.Readlink(filepath.Join(root, "skills", "reviewer"))
+	if err != nil {
+		t.Fatalf("Readlink() error = %v", err)
+	}
+	if target != "../.ctxpm/packages/skills/reviewer" {
+		t.Fatalf("compat symlink = %q", target)
+	}
+}
 func TestValidateReportsMissingPackageCompatibility(t *testing.T) {
 	root := t.TempDir()
 	packagePath := ".ctxpm/packages/skills/ctxpm-release"
@@ -171,6 +371,15 @@ func TestValidateReportsMissingPackageCompatibility(t *testing.T) {
 	if !containsIssue(result.Issues, `compatibility path ".agents/skills/ctxpm-release" is missing`) {
 		t.Fatalf("Validate() issues = %v", result.Issues)
 	}
+}
+
+func hasString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestResolveLatestVersionForMultiFileURLUsesTreeHash(t *testing.T) {

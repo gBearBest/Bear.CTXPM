@@ -92,7 +92,7 @@ func run(args []string) error {
 func runInit(app *engine.App, args []string) error {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	agent := fs.String("agent", "codex", "Primary agent profile")
+	agent := fs.String("agent", "", "Primary agent profile (defaults to detected agent or generic)")
 	projectName := fs.String("project-name", "", "Override project name")
 	force := fs.Bool("force", false, "Overwrite missing managed files when manifest already exists")
 	dryRun := fs.Bool("dry-run", false, "Report changes without writing files")

@@ -40,16 +40,77 @@ type InitOptions struct {
 }
 
 type InitResult struct {
-	ManifestPath string   `json:"manifest_path"`
-	Files        []string `json:"files"`
-	DryRun       bool     `json:"dry_run"`
+	ManifestPath               string   `json:"manifest_path"`
+	Files                      []string `json:"files"`
+	DryRun                     bool     `json:"dry_run"`
+	Agent                      string   `json:"agent"`
+	EntrypointFile             string   `json:"entrypoint_file"`
+	PackagesCreated            []string `json:"packages_created,omitempty"`
+	DependenciesCreated        []string `json:"dependencies_created,omitempty"`
+	MigratedResources          []string `json:"migrated_resources,omitempty"`
+	GitignoreUpdated           bool     `json:"gitignore_updated"`
+	OwnershipConfirmed         []string `json:"ownership_confirmed,omitempty"`
+	OwnershipInferred          []string `json:"ownership_inferred,omitempty"`
+	UnresolvedResources        []string `json:"unresolved_resources,omitempty"`
+	CtxpmDependencyStatus      string   `json:"ctxpm_dependency_status,omitempty"`
+	CtxpmCompatibilityComplete bool     `json:"ctxpm_compatibility_complete"`
+	ManagedEntrypointUpdated   bool     `json:"managed_entrypoint_updated"`
+	CtxpmYAMLStatus            string   `json:"ctxpm_yaml_status,omitempty"`
+	LocalCLIStatus             string   `json:"local_cli_status,omitempty"`
+	Warnings                   []string `json:"warnings,omitempty"`
+	AgentDetectionEvidence     []string `json:"agent_detection_evidence,omitempty"`
+	AgentDetectionSource       string   `json:"agent_detection_source,omitempty"`
 }
 
 func (r InitResult) Text() string {
 	lines := []string{
 		fmt.Sprintf("Initialized ctxpm project (%s)", ternary(r.DryRun, "dry-run", "applied")),
+		fmt.Sprintf("Agent: %s", r.Agent),
+		fmt.Sprintf("Entrypoint: %s", r.EntrypointFile),
 		fmt.Sprintf("Manifest: %s", r.ManifestPath),
 	}
+	lines = append(lines, fmt.Sprintf("ctxpm dependency: %s", fallbackString(r.CtxpmDependencyStatus, "unchanged")))
+	lines = append(lines, fmt.Sprintf("Local CLI: %s", fallbackString(r.LocalCLIStatus, "not prepared")))
+	lines = append(lines, fmt.Sprintf("Managed entrypoint updated: %s", ternary(r.ManagedEntrypointUpdated, "yes", "no")))
+	lines = append(lines, fmt.Sprintf("ctxpm compatibility complete: %s", ternary(r.CtxpmCompatibilityComplete, "yes", "no")))
+	lines = append(lines, fmt.Sprintf(".gitignore updated: %s", ternary(r.GitignoreUpdated, "yes", "no")))
+	if len(r.PackagesCreated) > 0 {
+		lines = append(lines, "Packages created:")
+		for _, item := range r.PackagesCreated {
+			lines = append(lines, "- "+item)
+		}
+	}
+	if len(r.DependenciesCreated) > 0 {
+		lines = append(lines, "Dependencies created:")
+		for _, item := range r.DependenciesCreated {
+			lines = append(lines, "- "+item)
+		}
+	}
+	if len(r.MigratedResources) > 0 {
+		lines = append(lines, "Migrated existing resources:")
+		for _, item := range r.MigratedResources {
+			lines = append(lines, "- "+item)
+		}
+	}
+	if len(r.OwnershipInferred) > 0 {
+		lines = append(lines, "Ownership inferred from project evidence:")
+		for _, item := range r.OwnershipInferred {
+			lines = append(lines, "- "+item)
+		}
+	}
+	if len(r.UnresolvedResources) > 0 {
+		lines = append(lines, "Unresolved resources:")
+		for _, item := range r.UnresolvedResources {
+			lines = append(lines, "- "+item)
+		}
+	}
+	if len(r.Warnings) > 0 {
+		lines = append(lines, "Warnings:")
+		for _, item := range r.Warnings {
+			lines = append(lines, "- "+item)
+		}
+	}
+	lines = append(lines, "Files touched:")
 	for _, item := range r.Files {
 		lines = append(lines, "- "+item)
 	}
@@ -57,9 +118,6 @@ func (r InitResult) Text() string {
 }
 
 func (a *App) Init(opts InitOptions) (*InitResult, error) {
-	if strings.TrimSpace(opts.Agent) == "" {
-		opts.Agent = "codex"
-	}
 	projectName := strings.TrimSpace(opts.ProjectName)
 	if projectName == "" {
 		projectName = filepath.Base(a.Root)
@@ -68,10 +126,14 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 	m, manifestPath, err := manifest.Load(a.Root)
 	switch {
 	case err == nil:
-		if !opts.Force {
-			return nil, fmt.Errorf("ctxpm manifest already exists at %s; rerun with --force to refresh managed files", manifestPath)
-		}
 	case errors.Is(err, manifest.ErrNotFound):
+		m = nil
+	default:
+		return nil, err
+	}
+	discovery := detectInitAgent(a.Root, opts.Agent, m)
+	opts.Agent = discovery.agent
+	if m == nil {
 		m = &manifest.Manifest{
 			Version:      manifest.ManifestVersion2,
 			Project:      manifest.Project{Name: projectName},
@@ -86,21 +148,23 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 				},
 			},
 		}
-	default:
-		return nil, err
 	}
 
-	if opts.Force && m.Project.Name == "" {
+	if m.Version != manifest.ManifestVersion2 {
+		m.Version = manifest.ManifestVersion2
+	}
+	if strings.TrimSpace(m.Project.Name) == "" || opts.Force {
 		m.Project.Name = projectName
 	}
-	if len(m.Agents) == 0 {
-		m.Agents = []string{opts.Agent}
-	}
+	m.Agents = filterEmptyStrings(m.Agents)
+	m.Agents = appendIfMissing(m.Agents, opts.Agent)
 	if m.Entrypoints == nil {
 		m.Entrypoints = map[string]manifest.Entrypoint{}
 	}
-	if _, ok := m.Entrypoints[opts.Agent]; !ok {
-		m.Entrypoints[opts.Agent] = manifest.Entrypoint{File: manifest.EntrypointFile(opts.Agent), Mode: "managed"}
+	delete(m.Entrypoints, "")
+	m.Entrypoints[opts.Agent] = manifest.Entrypoint{File: manifest.EntrypointFile(opts.Agent), Mode: "managed"}
+	if m.UpdatePolicy.Enabled == nil && strings.TrimSpace(m.UpdatePolicy.Interval) == "" && m.UpdatePolicy.IncludeSelf == nil {
+		m.UpdatePolicy = manifest.DefaultPolicy()
 	}
 
 	files := []string{}
@@ -126,10 +190,23 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 		}
 	}
 
+	resourcePlan, err := scanAndMigrateResources(a.Root, m, projectName, opts.DryRun)
+	if err != nil {
+		return nil, err
+	}
+	for _, pkg := range resourcePlan.packages {
+		m.Packages = append(m.Packages, pkg)
+	}
+	for _, dep := range resourcePlan.dependencies {
+		m.Dependencies = append(m.Dependencies, dep)
+	}
+	sortResources(m.Packages)
+	sortResources(m.Dependencies)
+
 	entrypointFile := filepath.Join(a.Root, manifest.EntrypointFile(opts.Agent))
 	files = append(files, entrypointFile)
 	if !opts.DryRun {
-		if err := ensureManagedEntrypoint(entrypointFile, opts.Agent); err != nil {
+		if err := ensureManagedEntrypoint(entrypointFile, opts.Agent, opts.Force); err != nil {
 			return nil, err
 		}
 	}
@@ -139,27 +216,61 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 
 	gitignorePath := filepath.Join(a.Root, ".gitignore")
 	files = append(files, gitignorePath)
+	gitignoreRules := dedupe(append([]string{".ctxpm/dependencies/", ".ctxpm/state/"}, resourcePlan.gitignoreRules...))
+	gitignoreUpdated := false
+	ctxpmStatus := "planned"
+	ctxpmYAMLStatus := "planned"
+	localCLIStatus := ""
 	if !opts.DryRun {
-		created, createdFiles, err := ensureBundledCtxpm(a.Root, m.Agents)
+		bundled, err := ensureBundledCtxpm(a.Root, m.Agents)
 		if err != nil {
 			return nil, err
 		}
-		ctxpmResource = created
+		ctxpmResource = bundled.Resource
 		upsertManagedDependency(&m.Dependencies, ctxpmResource)
-		files = append(files, createdFiles...)
+		files = append(files, bundled.Files...)
+		ctxpmStatus = bundled.Status
+		ctxpmYAMLStatus = bundled.YAMLStatus
+		localCLIStatus = bundled.LocalCLIStatus
+		resourcePlan.warnings = append(resourcePlan.warnings, bundled.Warnings...)
 
-		if err := ensureGitignoreRules(gitignorePath, []string{".ctxpm/dependencies/", ".ctxpm/state/"}); err != nil {
+		updated, err := ensureGitignoreRules(gitignorePath, gitignoreRules)
+		if err != nil {
 			return nil, err
 		}
+		gitignoreUpdated = updated
 		if _, err := manifest.Save(a.Root, m); err != nil {
 			return nil, err
 		}
+	} else {
+		ctxpmStatus = "planned"
+		ctxpmYAMLStatus = "planned"
+		localCLIStatus = "planned"
 	}
+	files = append(files, resourcePlan.files...)
+	sort.Strings(files)
 
 	return &InitResult{
-		ManifestPath: manifestPath,
-		Files:        files,
-		DryRun:       opts.DryRun,
+		ManifestPath:               manifestPath,
+		Files:                      dedupe(files),
+		DryRun:                     opts.DryRun,
+		Agent:                      opts.Agent,
+		EntrypointFile:             manifest.EntrypointFile(opts.Agent),
+		PackagesCreated:            resourceNames(resourcePlan.packages),
+		DependenciesCreated:        append(resourceNames(resourcePlan.dependencies), "ctxpm"),
+		MigratedResources:          resourcePlan.migrated,
+		GitignoreUpdated:           gitignoreUpdated,
+		OwnershipConfirmed:         nil,
+		OwnershipInferred:          dedupe(append(discovery.evidence, resourcePlan.ownershipInferred...)),
+		UnresolvedResources:        dedupe(resourcePlan.unresolved),
+		CtxpmDependencyStatus:      ctxpmStatus,
+		CtxpmCompatibilityComplete: len(ctxpmResource.Compatibility) > 0,
+		ManagedEntrypointUpdated:   true,
+		CtxpmYAMLStatus:            ctxpmYAMLStatus,
+		LocalCLIStatus:             localCLIStatus,
+		Warnings:                   dedupe(append(discovery.warnings, resourcePlan.warnings...)),
+		AgentDetectionEvidence:     discovery.evidence,
+		AgentDetectionSource:       discovery.entrypointSource,
 	}, nil
 }
 
@@ -967,26 +1078,31 @@ func removePaths(root string, resource manifest.Resource) error {
 	return os.RemoveAll(filepath.Join(root, filepath.FromSlash(resource.Path)))
 }
 
-func ensureGitignoreRules(path string, rules []string) error {
+func ensureGitignoreRules(path string, rules []string) (bool, error) {
 	existing := ""
 	if data, err := os.ReadFile(path); err == nil {
 		existing = string(data)
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
+		return false, err
 	}
 	builder := strings.Builder{}
 	builder.WriteString(existing)
 	if existing != "" && !strings.HasSuffix(existing, "\n") {
 		builder.WriteString("\n")
 	}
+	updated := false
 	for _, rule := range rules {
 		if strings.Contains(existing, rule) {
 			continue
 		}
 		builder.WriteString(rule)
 		builder.WriteString("\n")
+		updated = true
 	}
-	return os.WriteFile(path, []byte(builder.String()), 0o644)
+	if !updated && existing != "" {
+		return false, nil
+	}
+	return updated, os.WriteFile(path, []byte(builder.String()), 0o644)
 }
 
 type cachedCheckState struct {
@@ -1081,6 +1197,42 @@ func dedupe(values []string) []string {
 		result = append(result, value)
 	}
 	return result
+}
+
+func appendIfMissing(values []string, value string) []string {
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
+}
+
+func filterEmptyStrings(values []string) []string {
+	filtered := []string{}
+	for _, value := range values {
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		filtered = append(filtered, value)
+	}
+	return filtered
+}
+
+func resourceNames(resources []manifest.Resource) []string {
+	names := []string{}
+	for _, resource := range resources {
+		names = append(names, resource.Name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func fallbackString(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
 }
 
 func boolValue(value *bool, fallback bool) bool {
