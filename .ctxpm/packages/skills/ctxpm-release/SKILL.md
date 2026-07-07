@@ -16,11 +16,12 @@ This repository publishes stable releases from semantic version tags such as `v0
 - updating the GitHub Release body after assets are published
 - verifying that `latest` points at the newest stable release
 
-## Repository release rules
+## Repository release rules (Git Flow)
 
 - `main` is the latest stable release branch
 - `develop` is the ongoing integration branch
-- stable releases are created from `refs/heads/main`
+- stable releases are prepared on `release/vX.Y.Z` branches cut from `develop`
+- stable tags are created from `main` after finishing the release branch
 - release tags must use semantic version format: `vX.Y.Z`
 - pre-release tags may use a hyphen suffix such as `vX.Y.Z-rc.1`
 - the installer supports `latest` or an explicit version tag such as `v0.1.0`
@@ -28,33 +29,15 @@ This repository publishes stable releases from semantic version tags such as `v0
 
 ## Important repository-specific pitfalls
 
-### 1. Do not rely on implicit `main` ref resolution
-
-This repository still has a historical tag named `main`. Because of that, commands like:
-
-```sh
-git push origin main
-```
-
-can be ambiguous.
-
-Use explicit refs instead:
-
-```sh
-git push origin refs/heads/main:refs/heads/main
-git push origin refs/heads/develop:refs/heads/develop
-git push origin refs/tags/v0.1.0:refs/tags/v0.1.0
-```
-
-### 2. Keep the procedure in this skill, not public docs
+### 1. Keep the procedure in this skill, not public docs
 
 If future sessions need the release workflow, update this skill. Do not add release-flow explanations to README, INSTALL, or other public docs unless the user explicitly requests that.
 
-### 3. Release notes must be curated
+### 2. Release notes must be curated
 
 The workflow creates a GitHub Release automatically, but its default generated notes are not enough. After the release appears, replace or update the release body with a curated summary.
 
-## Standard stable release procedure
+## Standard stable release procedure (Git Flow)
 
 ### 1. Verify local state
 
@@ -69,10 +52,22 @@ git log --oneline --decorate -5
 Make sure:
 
 - the working tree is clean
-- the stable commit is on `main`
-- `develop` is in the expected state for post-release continuation
+- `develop` contains the intended release content
+- `main` still reflects the previous stable release
 
-### 2. Run the existing validation commands
+### 2. Create the release branch from `develop`
+
+Example for `v0.1.0`:
+
+```sh
+git switch develop
+git pull --ff-only origin develop
+git switch -c release/v0.1.0
+```
+
+On `release/v0.1.0`, do only release-hardening work (version bumps, changelog/release-note curation, last-minute fixes allowed by release policy).
+
+### 3. Run the existing validation commands on the release branch
 
 Mirror the workflow's local checks before tagging:
 
@@ -83,29 +78,49 @@ Mirror the workflow's local checks before tagging:
 
 If the change is docs-only and the user explicitly says not to run these again, follow that instruction. Otherwise use the same validation path as CI.
 
-### 3. Push branch refs explicitly
-
-Because `main` is ambiguous in this repository, push explicit branch refs:
+### 4. Push the release branch
 
 ```sh
-git push origin refs/heads/main:refs/heads/main
-git push -u origin refs/heads/develop:refs/heads/develop
+git push -u origin release/v0.1.0
 ```
 
-Only push `develop` if the local branch is intended to become or remain the tracked integration branch.
+### 5. Finish release: merge to `main`, tag, then back-merge to `develop`
 
-### 4. Create and push the release tag
-
-Create an annotated tag from `main`:
+1) Merge release into `main` and push:
 
 ```sh
-git tag -a v0.1.0 -m "Bear.CTXPM v0.1.0" refs/heads/main
-git push origin refs/tags/v0.1.0:refs/tags/v0.1.0
+git switch main
+git pull --ff-only origin main
+git merge --no-ff release/v0.1.0 -m "Merge release/v0.1.0 into main"
+git push origin main
 ```
 
-Do not tag from `develop` unless `develop` and `main` intentionally point at the same release commit and that state has already been pushed to `main`.
+2) Create and push the annotated tag from `main`:
 
-### 5. Wait for the GitHub Actions release workflow
+```sh
+git tag -a v0.1.0 -m "Bear.CTXPM v0.1.0" main
+git push origin v0.1.0
+```
+
+3) Merge the same release branch back into `develop` and push:
+
+```sh
+git switch develop
+git pull --ff-only origin develop
+git merge --no-ff release/v0.1.0 -m "Merge release/v0.1.0 back into develop"
+git push origin develop
+```
+
+4) Delete release branch after both merges are complete:
+
+```sh
+git branch -d release/v0.1.0
+git push origin --delete release/v0.1.0
+```
+
+Do not tag from `develop`. In Git Flow, stable tags are created from `main` after the release-branch merge.
+
+### 6. Wait for the GitHub Actions release workflow
 
 The release workflow will:
 
@@ -122,7 +137,7 @@ The release workflow will:
 
 Pre-release tags should not advance `latest`.
 
-### 6. Update the GitHub Release notes
+### 7. Update the GitHub Release notes
 
 After the release appears, replace the default generated notes with a curated body.
 
@@ -161,7 +176,7 @@ curl -fsSL https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/latest/cli/ins
 
 Focus the notes on what users need to know, not on a raw commit dump.
 
-### 7. Verify published results
+### 8. Verify published results
 
 Confirm all of the following:
 
@@ -171,13 +186,13 @@ Confirm all of the following:
 - expected assets are uploaded
 - `latest` points at the same commit as the stable tag
 
-## Pre-release procedure
+## Pre-release procedure (Git Flow-compatible)
 
-Use the same workflow, but with a pre-release tag such as:
+Use the same Git Flow release-branch flow, but with a pre-release tag such as:
 
 ```sh
-git tag -a v0.2.0-rc.1 -m "Bear.CTXPM v0.2.0-rc.1" refs/heads/main
-git push origin refs/tags/v0.2.0-rc.1:refs/tags/v0.2.0-rc.1
+git tag -a v0.2.0-rc.1 -m "Bear.CTXPM v0.2.0-rc.1" main
+git push origin v0.2.0-rc.1
 ```
 
 Expected behavior:
@@ -185,6 +200,17 @@ Expected behavior:
 - GitHub Release is created as a pre-release
 - assets are still built and uploaded
 - `latest` must not move
+
+## Hotfix procedure (Git Flow)
+
+For urgent production fixes:
+
+1) branch from `main`: `hotfix/vX.Y.Z`
+2) apply and validate fix
+3) merge hotfix into `main`
+4) tag on `main` and push tag
+5) merge hotfix back into `develop`
+6) delete hotfix branch
 
 ## Right and wrong examples
 
@@ -197,29 +223,38 @@ git tag v0.1.0
 
 Why wrong:
 
-- `main` can resolve ambiguously in this repository
 - lightweight tags are less explicit than the annotated tags used here
+- this skips the required Git Flow release-branch finish sequence (`main` + back-merge to `develop`)
 
 Right:
 
 ```sh
-git push origin refs/heads/main:refs/heads/main
-git tag -a v0.1.0 -m "Bear.CTXPM v0.1.0" refs/heads/main
-git push origin refs/tags/v0.1.0:refs/tags/v0.1.0
+git switch -c release/v0.1.0 develop
+git push -u origin release/v0.1.0
+git switch main
+git merge --no-ff release/v0.1.0
+git push origin main
+git tag -a v0.1.0 -m "Bear.CTXPM v0.1.0" main
+git push origin v0.1.0
+git switch develop
+git merge --no-ff release/v0.1.0
+git push origin develop
 ```
 
 Wrong:
 
 - leaving the auto-generated release notes unchanged
 - documenting the full release procedure in public docs without user approval
+- tagging directly from `develop` for stable release
 
 Right:
 
 - curating the release body after the release is published
 - keeping the reusable procedure in this skill
+- finishing `release/*` into both `main` and `develop`
 
 ## Learnings
 
-- This repository has a legacy `main` tag, so release pushes must use explicit `refs/heads/...` and `refs/tags/...` syntax to avoid ambiguity.
 - `latest` is maintained by the release workflow as the moving stable tag; release operators should verify it after every stable publication.
 - The project owner wants the release workflow preserved as a project-level skill rather than as general version-controlled documentation pages.
+- Git Flow is now the canonical release model: `develop` -> `release/*` -> merge to `main` (tag) -> back-merge to `develop`.
