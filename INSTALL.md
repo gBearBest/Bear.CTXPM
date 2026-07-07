@@ -4,7 +4,7 @@ This document is an installation guide for AI agents to read and execute directl
 Users can give this file to any AI agent with project file read/write capability and ask it to connect the current project to the `ctxpm` protocol according to the ideas of Bear.CTXPM v0.1.
 
 You are not only installing a command-line tool.  
-You are organizing the current project into an AI resource management project that conforms to the Bear.CTXPM protocol, and you should install or prepare the companion `ctxpm` CLI when it is available so future AI resource operations can use the canonical CLI workflow.
+You are organizing the current project into an AI resource management project that conforms to the Bear.CTXPM protocol, and you should install or prepare the project-local companion `ctxpm` CLI as early as possible. When that local CLI is available, use it to execute the deterministic bootstrap and initialization workflow first so future AI resource operations can use the canonical CLI workflow instead of reimplementing every fixed step manually.
 
 ---
 
@@ -23,7 +23,7 @@ Your execution goals:
 6. Move project-local AI resources into `.ctxpm/packages/`.
 7. Update `.gitignore` to ignore external AI resource directories.
 8. Record stable version hashes for external AI resources when their source is known.
-9. Install or prepare the companion `ctxpm` CLI when it is available, place it under the bundled `ctxpm` skill directory at `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm`, and verify that it can run.
+9. Install or prepare the project-local companion `ctxpm` CLI when it is available, place it under the bundled `ctxpm` skill directory at `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm`, verify that it can run, and prefer using that project-local executable to initialize the project before doing manual follow-up work.
 
 ---
 
@@ -68,8 +68,9 @@ The mapping between agents and default entrypoint files is:
 Do not confuse the Bear.CTXPM protocol with the companion CLI implementation.  
 The project adopts `ctxpm` through documentation, directory structure, and managed entrypoint blocks.
 
-However, when the official companion `ctxpm` CLI is available, install or prepare it early in the setup flow and prefer it for managed AI resource operations such as:
+However, when the official companion `ctxpm` CLI is available, install or prepare the project-local copy early in the setup flow and prefer that project-local executable for deterministic AI resource operations such as:
 
+- `ctxpm init`
 - `ctxpm install`
 - `ctxpm add`
 - `ctxpm list`
@@ -77,6 +78,8 @@ However, when the official companion `ctxpm` CLI is available, install or prepar
 - `ctxpm update`
 - `ctxpm remove`
 - `ctxpm validate`
+
+During installation, do not make the AI manually recreate deterministic scaffolding that the project-local `ctxpm` CLI can generate and verify on its own. Use the local CLI first for fixed bootstrap work, then let the AI inspect the output, validate the resulting state, and handle unresolved ownership or migration decisions.
 
 If the CLI cannot be installed in the current environment, continue the protocol setup manually and report that the CLI setup could not be completed.
 
@@ -182,7 +185,7 @@ Follow these steps in order. Do not skip steps.
 2. Ask the user which agent they currently use if necessary.
 3. Select the corresponding entrypoint filename.
 
-### 5.2 Install or Prepare the Companion `ctxpm` CLI
+### 5.2 Install or Prepare the Project-Local Companion `ctxpm` CLI
 
 Before migrating resources, try to install or prepare the companion `ctxpm` CLI.
 
@@ -193,23 +196,56 @@ Recommended order:
 3. If it is not already present, create the parent directory `.ctxpm/dependencies/skills/ctxpm/cli/`.
 4. If a global `ctxpm` command is already available in the environment, it may be used as the source binary, but the project installation should still place a copy or equivalent local executable at `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm`.
 5. If the local repository contains the CLI source under `cli/`, prefer building from source and placing the resulting binary at `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm`.
-6. If source build is not practical and the Bear.CTXPM repository contains `cli/install.sh`, use that installer in project mode so the CLI lands directly in the canonical project-local path.
-   - Stable CLI releases use semantic version tags such as `v0.1.0`.
-   - Prefer the default `latest` channel unless the user explicitly asks to pin a specific tagged version.
-   - Minimal project-local install: `sh cli/install.sh --scope project`
-   - Optional explicit latest form: `sh cli/install.sh --scope project --project-root . --version latest`
-   - Optional pinned version form: `sh cli/install.sh --scope project --project-root . --version v0.1.0`
+6. If source build is not practical, use the official remote installer in project mode. This is the default installation path for initialization, and it should install the latest release into the current project root:
+   - `curl -fsSL https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/latest/cli/install.sh | sh -s -- --scope project`
+   - Assume the current working directory is the project root unless there is a clear reason to pass `--project-root`.
+   - Only mention `--version <tag>` when the user explicitly asks to pin a specific release such as `v0.1.0`.
+   - Only mention global installation when the user explicitly asks for a shell-wide command outside project initialization.
+   - If the current repository already contains a trusted local `cli/install.sh`, it may be used as an offline or repository-local fallback: `sh cli/install.sh --scope project`
    - On Windows-like shell environments, project mode should still preserve the canonical launcher path `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm`, while also placing sibling helper launchers such as `ctxpm.exe` and `ctxpm.cmd` in the same directory when needed.
-7. The same installer may also be used independently for a global shell-wide install when the user wants a global `ctxpm` command.
-   - Minimal global install: `sh cli/install.sh --scope global`
-   - Optional explicit latest form: `sh cli/install.sh --scope global --version latest`
-   - Optional pinned version form: `sh cli/install.sh --scope global --version v0.1.0`
-8. After installation, copy, or build, verify that `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm --help` succeeds.
-9. If CLI setup fails, do not stop the protocol installation. Continue with the manual workflow, but report clearly that the companion CLI could not be prepared.
+7. After installation, copy, or build, verify that `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm --help` succeeds.
+8. Once that verification succeeds, use the project-local executable for initialization instead of switching back to a global command:
+   - Minimal form: `./.ctxpm/dependencies/skills/ctxpm/cli/ctxpm init --agent <agent-id>`
+   - Optional project name override: `./.ctxpm/dependencies/skills/ctxpm/cli/ctxpm init --agent <agent-id> --project-name <project-name>`
+   - Optional preview form before applying writes: `./.ctxpm/dependencies/skills/ctxpm/cli/ctxpm init --agent <agent-id> --dry-run`
+   - If the entrypoint already contains a damaged managed block and the user intends to repair it, review the damage first and only then rerun with `--force`.
+9. Treat the project-local `ctxpm init` result as the primary initialization action for deterministic setup work such as:
+   - creating the canonical `.ctxpm/` directory skeleton
+   - creating or updating `ctxpm.yaml`
+   - writing or repairing the managed root entrypoint block
+   - installing or refreshing the bundled `ctxpm` dependency and local CLI path
+   - adding baseline `.gitignore` rules
+   - migrating resources that can be resolved safely by the tool
+10. If CLI setup fails, do not stop the protocol installation. Continue with the manual workflow, but report clearly that the companion CLI could not be prepared and that the deterministic init flow could not be delegated to the local CLI.
 
-### 5.3 Scan AI Resources in the Project
+### 5.3 Review the `ctxpm init` Result, Then Continue Scanning AI Resources
 
-Scan all possible AI resources in the project, including but not limited to:
+After running the project-local `ctxpm init` command, do not assume the installation is complete just because the command exited successfully. Review the output and verify the resulting project state.
+
+Recommended verification flow:
+
+1. Read the `ctxpm init` output and explicitly inspect these result categories:
+   - detected `Agent`
+   - chosen `Entrypoint`
+   - `ctxpm dependency` status
+   - `Local CLI` status
+   - whether the managed entrypoint was updated
+   - whether `ctxpm` compatibility setup completed
+   - whether `.gitignore` was updated
+   - any `Unresolved resources`
+   - any `Warnings`
+2. Run the local validation command:
+   - `./.ctxpm/dependencies/skills/ctxpm/cli/ctxpm validate`
+3. If validation fails, inspect the reported issues and fix only the unresolved or conflicting parts instead of redoing the whole initialization manually.
+4. If validation succeeds, still inspect the generated or touched files that matter for the current project, especially:
+   - `ctxpm.yaml`
+   - the selected root entrypoint file
+   - `.gitignore`
+   - `.ctxpm/dependencies/skills/ctxpm/`
+5. Treat the CLI output as a guided checklist for AI review. The AI should verify the result, explain any warnings, and continue only where human judgment or project-specific classification is still required.
+6. Only after this review should the AI continue with any remaining manual scan or migration work that the CLI could not complete safely.
+
+Then scan all possible AI resources in the project, including but not limited to:
 
 - Existing `AGENTS.md`, `CLAUDE.md`, `ANTIGRAVITY.md`
 - `skills/`
@@ -228,7 +264,7 @@ For each resource, decide:
 3. Whether it should be migrated under `.ctxpm/`.
 4. Whether it only needs to be referenced instead of copied.
 
-Before classifying existing discovered resources, do not silently assume they are all `package`. First, summarize the detected resources and confirm ownership with the user through interactive dialogue.
+Before classifying existing discovered resources, do not silently assume they are all `package`. First, summarize the detected resources and confirm ownership with the user through interactive dialogue. If `ctxpm init` already migrated or classified some resources, review that result first and only ask follow-up questions for the remaining unresolved or ambiguous cases.
 
 Recommended interaction flow:
 
@@ -307,6 +343,8 @@ If they do not already exist, create:
 ### 5.6 Migrate Existing Resources
 
 Organize the resources that have been identified.
+
+When the project-local `ctxpm init` command already completed a safe migration or bootstrap action, prefer verifying and building on that result instead of manually reproducing the same deterministic step again.
 
 Only migrate a resource after its ownership has been explicitly confirmed by the user or established through the explicit evidence criteria above. If ownership is unresolved, leave the resource in place and report it as blocked pending user confirmation.
 
@@ -511,7 +549,9 @@ At minimum, this step must:
 3. Create or update the companion CLI directory at `.ctxpm/dependencies/skills/ctxpm/cli/`.
 4. Install or place the project-local companion CLI at `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm`.
    - If a global `ctxpm` is already available, it may be copied from that global installation.
-   - If `cli/install.sh` is used, prefer `sh cli/install.sh --scope project` so the canonical project-local launcher is created in place.
+   - Prefer the official remote installer in project mode: `curl -fsSL https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/latest/cli/install.sh | sh -s -- --scope project`
+   - Treat this as the default initialization path: latest release, project scope, current directory as project root.
+   - If the current repository already contains a trusted local installer, `sh cli/install.sh --scope project` is an acceptable fallback so the canonical project-local launcher is created in place.
    - On Windows-like shell environments, the project-local directory may also include sibling helper launchers such as `ctxpm.exe` and `ctxpm.cmd`, but `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm` remains the canonical launcher path for the protocol-managed installation.
 5. Immediately create compatibility symlinks in every confirmed agent's default skill discovery directories, such as `.agents/skills/ctxpm`, so each agent can discover the skill from its normal skill or slash-command UI.
 6. Record `ctxpm` in `ctxpm.yaml` as an external `dependency` of type `skill`.
@@ -570,6 +610,8 @@ After installation, report:
 13. Which external dependencies have hash-based versions recorded, and which still require source or entry-file confirmation.
 14. Whether `.ctxpm/dependencies/skills/ctxpm/ctxpm-yaml.md` was created or updated as the `ctxpm` skill companion document.
 15. Whether `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm` was installed or updated as the project-local companion CLI path.
+16. Whether the project-local `ctxpm init` command was run, and whether it completed successfully.
+17. Whether the post-init `ctxpm validate` check succeeded, and if not, which issues remained for manual follow-up.
 
 ---
 
@@ -648,12 +690,14 @@ After completion, the project should at least satisfy:
 8. `.ctxpm/dependencies/skills/ctxpm/SKILL.md` exists and is recorded in `ctxpm.yaml`.
 9. `.ctxpm/dependencies/skills/ctxpm/ctxpm-yaml.md` exists as a companion document for the `ctxpm` skill.
 10. `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm` exists as the canonical local CLI path for the bundled `ctxpm` skill when the companion CLI was prepared.
-11. Compatibility symlinks for managed resources exist in each confirmed agent's recognizable discovery directories for the corresponding resource types.
-12. The `ctxpm` dependency entry in `ctxpm.yaml` records both the canonical `.ctxpm/dependencies/...` path and every compatibility symlink path.
-13. The managed entrypoint block uses the canonical `ctxpm` template and instructs future AI agents to use `ctxpm` or the same `ctxpm` workflow before creating, reading, updating, or deleting AI resources.
-14. Future AI resources continue to be managed using the same `ctxpm` rules instead of agent default install locations.
-15. External dependencies installed from GitHub or direct URLs record hash-based `version` values in `ctxpm.yaml` for future update detection.
-16. The complete YAML format lives in `.ctxpm/dependencies/skills/ctxpm/ctxpm-yaml.md`.
+11. When the project-local CLI was available, the project-local `ctxpm init` workflow has been executed instead of relying on purely manual AI bootstrapping for deterministic steps.
+12. Compatibility symlinks for managed resources exist in each confirmed agent's recognizable discovery directories for the corresponding resource types.
+13. The `ctxpm` dependency entry in `ctxpm.yaml` records both the canonical `.ctxpm/dependencies/...` path and every compatibility symlink path.
+14. The managed entrypoint block uses the canonical `ctxpm` template and instructs future AI agents to use `ctxpm` or the same `ctxpm` workflow before creating, reading, updating, or deleting AI resources.
+15. Future AI resources continue to be managed using the same `ctxpm` rules instead of agent default install locations.
+16. External dependencies installed from GitHub or direct URLs record hash-based `version` values in `ctxpm.yaml` for future update detection.
+17. The complete YAML format lives in `.ctxpm/dependencies/skills/ctxpm/ctxpm-yaml.md`.
+18. A post-init validation pass has been completed, or any remaining validation failures have been reported explicitly.
 
 ---
 
@@ -662,12 +706,14 @@ After completion, the project should at least satisfy:
 If you are an AI agent directly given this file by a user, work as follows:
 
 1. Ask for or identify the agent first.
-2. Then scan the project.
-3. Then propose a migration plan.
-4. Execute the migration when write permission is available.
-5. Finally report the modification results.
+2. Then install or prepare the project-local `ctxpm` CLI if possible.
+3. Then use the project-local CLI to run `ctxpm init` for deterministic bootstrap work.
+4. Then review the init output and run validation.
+5. Then scan the project for unresolved, ambiguous, or project-specific resources that still need AI judgment.
+6. Execute only the remaining migration and repair work that the CLI could not complete safely.
+7. Finally report the modification results and the verification outcome.
 
 Do not start by changing files immediately.  
-Identify, classify, migrate, and then write entrypoint documents.
+Prefer the project-local CLI for fixed initialization steps first, then identify, classify, verify, and finish any remaining migration work.
 
 Your goal is not to "generate a pile of new formats", but to make this project from now on have a unified, clear AI resource management structure that other AI agents can continue to take over.
