@@ -25,7 +25,7 @@ func TestInstallRepairsPackageCompatibility(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	writeManifestForTest(t, root, &manifest.Manifest{
-		Version: 1,
+		Version: manifest.CurrentManifestVersion,
 		Project: manifest.Project{Name: "sample"},
 		Agents:  []string{"generic"},
 		Packages: []manifest.Resource{
@@ -71,7 +71,7 @@ func TestInstallRepairsDependencyCompatibilityWithoutSource(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	writeManifestForTest(t, root, &manifest.Manifest{
-		Version: 2,
+		Version: manifest.CurrentManifestVersion,
 		Project: manifest.Project{Name: "sample"},
 		Agents:  []string{"generic"},
 		Dependencies: []manifest.Resource{
@@ -118,7 +118,7 @@ func TestInstallUpdatesGitignoreForCompatibilityDirectories(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	writeManifestForTest(t, root, &manifest.Manifest{
-		Version: 2,
+		Version: manifest.CurrentManifestVersion,
 		Project: manifest.Project{Name: "sample"},
 		Agents:  []string{"generic"},
 		Packages: []manifest.Resource{
@@ -156,7 +156,7 @@ func TestInstallIndexesCanonicalPackageFromCtxpmDirectory(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	writeManifestForTest(t, root, &manifest.Manifest{
-		Version:      2,
+		Version:      manifest.CurrentManifestVersion,
 		Project:      manifest.Project{Name: "sample"},
 		Agents:       []string{"generic"},
 		Dependencies: []manifest.Resource{},
@@ -215,7 +215,7 @@ func TestInstallIndexesCanonicalDependencyFromCtxpmDirectory(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	writeManifestForTest(t, root, &manifest.Manifest{
-		Version:      2,
+		Version:      manifest.CurrentManifestVersion,
 		Project:      manifest.Project{Name: "sample"},
 		Agents:       []string{"generic"},
 		Dependencies: []manifest.Resource{},
@@ -281,8 +281,8 @@ func TestInitCreatesV2Manifest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("manifest.Load() error = %v", err)
 	}
-	if loaded.Version != manifest.ManifestVersion2 {
-		t.Fatalf("manifest version = %d", loaded.Version)
+	if loaded.Version != manifest.CurrentManifestVersion {
+		t.Fatalf("manifest version = %s", loaded.Version)
 	}
 	if len(loaded.Dependencies) != 1 {
 		t.Fatalf("dependencies = %d, want 1", len(loaded.Dependencies))
@@ -331,7 +331,7 @@ func TestInitUpdatesGitignoreForExistingCompatibilityPaths(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	writeManifestForTest(t, root, &manifest.Manifest{
-		Version: 2,
+		Version: manifest.CurrentManifestVersion,
 		Project: manifest.Project{Name: "sample"},
 		Agents:  []string{"generic"},
 		Packages: []manifest.Resource{
@@ -458,7 +458,7 @@ func TestInitForceRepairsDamagedManagedBlock(t *testing.T) {
 func TestInitRepairsExistingManifestWithoutForce(t *testing.T) {
 	root := t.TempDir()
 	writeManifestForTest(t, root, &manifest.Manifest{
-		Version:      1,
+		Version:      manifest.CurrentManifestVersion,
 		Project:      manifest.Project{Name: "sample"},
 		Agents:       []string{"generic"},
 		Dependencies: []manifest.Resource{},
@@ -477,8 +477,8 @@ func TestInitRepairsExistingManifestWithoutForce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("manifest.Load() error = %v", err)
 	}
-	if loaded.Version != manifest.ManifestVersion2 {
-		t.Fatalf("manifest version = %d", loaded.Version)
+	if loaded.Version != manifest.CurrentManifestVersion {
+		t.Fatalf("manifest version = %s", loaded.Version)
 	}
 	if loaded.Project.Name != "sample" {
 		t.Fatalf("project.name = %q", loaded.Project.Name)
@@ -691,7 +691,7 @@ func TestValidateReportsMissingPackageCompatibility(t *testing.T) {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
 	writeManifestForTest(t, root, &manifest.Manifest{
-		Version: 1,
+		Version:      manifest.CurrentManifestVersion,
 		Project: manifest.Project{Name: "sample"},
 		Agents:  []string{"generic"},
 		Packages: []manifest.Resource{
@@ -726,7 +726,7 @@ func TestDetectFindsUnmanagedCompatibilityResource(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	writeManifestForTest(t, root, &manifest.Manifest{
-		Version:      2,
+		Version:      manifest.CurrentManifestVersion,
 		Project:      manifest.Project{Name: "sample"},
 		Agents:       []string{"generic"},
 		Dependencies: []manifest.Resource{},
@@ -762,7 +762,7 @@ func TestMigrateMovesCompatibilityResourceAndValidates(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	writeManifestForTest(t, root, &manifest.Manifest{
-		Version:      2,
+		Version:      manifest.CurrentManifestVersion,
 		Project:      manifest.Project{Name: "sample"},
 		Agents:       []string{"generic"},
 		Dependencies: []manifest.Resource{},
@@ -873,7 +873,7 @@ func TestInstallCopiesMultiFileURLDependencyAndUpdatesVersion(t *testing.T) {
 	defer server.Close()
 
 	writeManifestForTest(t, root, &manifest.Manifest{
-		Version: 2,
+		Version: manifest.CurrentManifestVersion,
 		Project: manifest.Project{Name: "sample"},
 		Agents:  []string{"generic"},
 		Dependencies: []manifest.Resource{
@@ -955,7 +955,7 @@ func TestInstallArchiveDependency(t *testing.T) {
 	defer server.Close()
 
 	writeManifestForTest(t, root, &manifest.Manifest{
-		Version: 2,
+		Version: manifest.CurrentManifestVersion,
 		Project: manifest.Project{Name: "sample"},
 		Agents:  []string{"generic"},
 		Dependencies: []manifest.Resource{
@@ -1007,7 +1007,7 @@ func TestUpdateRefreshesManagedEntrypointBlocks(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	writeManifestForTest(t, root, &manifest.Manifest{
-		Version: 2,
+		Version: manifest.CurrentManifestVersion,
 		Project: manifest.Project{Name: "sample"},
 		Agents:  []string{"generic"},
 		Dependencies: []manifest.Resource{
@@ -1075,7 +1075,7 @@ func TestUpdateRefreshesAllManagedEntrypoints(t *testing.T) {
 		}
 	}
 	writeManifestForTest(t, root, &manifest.Manifest{
-		Version: 2,
+		Version: manifest.CurrentManifestVersion,
 		Project: manifest.Project{Name: "sample"},
 		Agents:  []string{"generic", "claude-code"},
 		Dependencies: []manifest.Resource{
@@ -1157,7 +1157,7 @@ func TestUpdateRunsInstallAfterManifestRefresh(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	writeManifestForTest(t, root, &manifest.Manifest{
-		Version: 2,
+		Version: manifest.CurrentManifestVersion,
 		Project: manifest.Project{Name: "sample"},
 		Agents:  []string{"generic"},
 		Dependencies: []manifest.Resource{
@@ -1216,7 +1216,7 @@ func TestUpdateReportsDamagedManagedBlock(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	writeManifestForTest(t, root, &manifest.Manifest{
-		Version: 2,
+		Version: manifest.CurrentManifestVersion,
 		Project: manifest.Project{Name: "sample"},
 		Agents:  []string{"generic"},
 		Dependencies: []manifest.Resource{

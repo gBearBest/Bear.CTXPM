@@ -39,7 +39,7 @@ Apply the same compatibility rule to other managed resources: keep the canonical
 
 Record `ctxpm` as an external `dependency` of type `skill`.
 
-Recommended v2 entry:
+Recommended 1.0 entry:
 
 ```yaml
 dependencies:
@@ -97,10 +97,10 @@ If the CLI is unavailable, follow the same protocol manually instead of inventin
 
 The complete schema is defined in [`ctxpm-yaml.md`](ctxpm-yaml.md). `SKILL.md` should tell agents to read that sibling file before editing `ctxpm.yaml`.
 
-Compact v2 example:
+Compact 1.0 example:
 
 ```yaml
-version: 2
+version: 1.0
 
 project:
   name: your-project-name

@@ -419,7 +419,7 @@ Install the complete format document as the `ctxpm` skill companion file at `.ct
 Reference template for `ctxpm.yaml`:
 
 ```yaml
-version: 2
+version: 1.0
 
 project:
   name: your-project-name
