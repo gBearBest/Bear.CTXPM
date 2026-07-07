@@ -22,6 +22,13 @@ dependencies:
     compatibility:
       - .agents/skills/ctxpm
 packages:
+  - name: ctxpm-release
+    type: skill
+    layout: dir
+    path: .ctxpm/packages/skills/ctxpm-release
+    entry: SKILL.md
+    compatibility:
+      - .agents/skills/ctxpm-release
   - name: ctxpm-source-boundary
     type: rule
     layout: file

@@ -248,6 +248,7 @@ Recommended verification flow:
 Then scan all possible AI resources in the project, including but not limited to:
 
 - Existing `AGENTS.md`, `CLAUDE.md`, `ANTIGRAVITY.md`
+- Existing canonical resources already stored under `.ctxpm/packages/` and `.ctxpm/dependencies/` that are not yet recorded in `ctxpm.yaml`
 - `skills/`
 - `rules/`
 - `specs/`

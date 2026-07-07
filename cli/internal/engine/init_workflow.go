@@ -30,10 +30,11 @@ type initResourcePlan struct {
 }
 
 type discoveredResource struct {
-	kind     string
-	resource manifest.Resource
-	original string
-	evidence []string
+	kind              string
+	resource          manifest.Resource
+	original          string
+	evidence          []string
+	requiresMigration bool
 }
 
 func detectInitAgent(root string, requested string, m *manifest.Manifest) initDiscovery {
@@ -118,28 +119,38 @@ func scanAndMigrateResources(root string, m *manifest.Manifest, projectName stri
 		return nil, err
 	}
 	for _, candidate := range candidates {
-		candidate.resource.Compatibility = dedupe(append(compatibilityPaths(m.Agents, candidate.resource), candidate.original))
-		if m.HasResource(candidate.resource.Name) {
-			plan.unresolved = append(plan.unresolved, fmt.Sprintf("%s (%s): resource name already exists in ctxpm.yaml", candidate.original, candidate.resource.Name))
-			continue
+		candidate.resource.Compatibility = compatibilityPaths(m.Agents, candidate.resource)
+		if candidate.requiresMigration {
+			candidate.resource.Compatibility = dedupe(append(candidate.resource.Compatibility, candidate.original))
 		}
-		if resourcePathExists(root, candidate.resource.Path) {
-			plan.unresolved = append(plan.unresolved, fmt.Sprintf("%s: canonical path %s already exists", candidate.original, candidate.resource.Path))
+		if m.HasResource(candidate.resource.Name) {
+			if candidate.requiresMigration {
+				plan.unresolved = append(plan.unresolved, fmt.Sprintf("%s (%s): resource name already exists in ctxpm.yaml", candidate.original, candidate.resource.Name))
+			}
 			continue
 		}
 		if dryRun {
-			plan.recordCandidate(candidate)
+			plan.recordCandidate(candidate, candidate.requiresMigration)
 			continue
 		}
-		if err := moveResourceToCanonical(root, candidate.original, candidate.resource.Path); err != nil {
-			plan.unresolved = append(plan.unresolved, fmt.Sprintf("%s: migration failed: %v", candidate.original, err))
+		if candidate.requiresMigration {
+			if resourcePathExists(root, candidate.resource.Path) {
+				plan.unresolved = append(plan.unresolved, fmt.Sprintf("%s: canonical path %s already exists", candidate.original, candidate.resource.Path))
+				continue
+			}
+			if err := moveResourceToCanonical(root, candidate.original, candidate.resource.Path); err != nil {
+				plan.unresolved = append(plan.unresolved, fmt.Sprintf("%s: migration failed: %v", candidate.original, err))
+				continue
+			}
+		} else if err := ensureResourcePresence(root, candidate.resource, ""); err != nil {
+			plan.unresolved = append(plan.unresolved, fmt.Sprintf("%s: canonical resource is invalid: %v", candidate.original, err))
 			continue
 		}
 		if err := ensureCompatibility(root, candidate.resource); err != nil {
 			plan.unresolved = append(plan.unresolved, fmt.Sprintf("%s: compatibility setup failed: %v", candidate.original, err))
 			continue
 		}
-		plan.recordCandidate(candidate)
+		plan.recordCandidate(candidate, candidate.requiresMigration)
 		plan.files = append(plan.files, filepath.Join(root, filepath.FromSlash(candidate.resource.Path)))
 		for _, compat := range candidate.resource.Compatibility {
 			plan.files = append(plan.files, filepath.Join(root, filepath.FromSlash(compat)))
@@ -148,14 +159,16 @@ func scanAndMigrateResources(root string, m *manifest.Manifest, projectName stri
 	return plan, nil
 }
 
-func (p *initResourcePlan) recordCandidate(candidate discoveredResource) {
+func (p *initResourcePlan) recordCandidate(candidate discoveredResource, migrated bool) {
 	switch candidate.kind {
 	case "dependency":
 		p.dependencies = append(p.dependencies, candidate.resource)
 	default:
 		p.packages = append(p.packages, candidate.resource)
 	}
-	p.migrated = append(p.migrated, candidate.original)
+	if migrated {
+		p.migrated = append(p.migrated, candidate.original)
+	}
 	p.ownershipInferred = append(p.ownershipInferred, fmt.Sprintf("%s -> %s (%s)", candidate.original, candidate.kind, strings.Join(candidate.evidence, "; ")))
 	p.gitignoreRules = append(p.gitignoreRules, compatibilityIgnoreRules(candidate.resource)...)
 }
@@ -169,7 +182,7 @@ func discoverInitResources(root string, projectHints []string) ([]discoveredReso
 		"prompts": "prompt",
 		"mcp":     "mcp",
 	} {
-		discovered, err := discoverTypedResourceDir(root, relDir, resourceType, true, projectHints)
+		discovered, err := discoverTypedResourceDir(root, relDir, resourceType, true, projectHints, true)
 		if err != nil {
 			return nil, err
 		}
@@ -182,7 +195,7 @@ func discoverInitResources(root string, projectHints []string) ([]discoveredReso
 		"ai/prompts": "prompt",
 		"ai/mcp":     "mcp",
 	} {
-		discovered, err := discoverTypedResourceDir(root, relDir, resourceType, true, projectHints)
+		discovered, err := discoverTypedResourceDir(root, relDir, resourceType, true, projectHints, true)
 		if err != nil {
 			return nil, err
 		}
@@ -193,11 +206,16 @@ func discoverInitResources(root string, projectHints []string) ([]discoveredReso
 		return nil, err
 	}
 	candidates = append(candidates, discoveredDocs...)
+	discoveredCanonical, err := discoverCanonicalResources(root)
+	if err != nil {
+		return nil, err
+	}
+	candidates = append(candidates, discoveredCanonical...)
 	sortDiscoveredResources(candidates)
 	return dedupeDiscoveredResources(candidates), nil
 }
 
-func discoverTypedResourceDir(root, relDir, resourceType string, packageOwned bool, projectHints []string) ([]discoveredResource, error) {
+func discoverTypedResourceDir(root, relDir, resourceType string, packageOwned bool, projectHints []string, requiresMigration bool) ([]discoveredResource, error) {
 	absDir := filepath.Join(root, filepath.FromSlash(relDir))
 	entries, err := os.ReadDir(absDir)
 	if err != nil {
@@ -250,10 +268,85 @@ func discoverTypedResourceDir(root, relDir, resourceType string, packageOwned bo
 			kind = "dependency"
 		}
 		discovered = append(discovered, discoveredResource{
-			kind:     kind,
-			resource: resource,
-			original: entryRel,
-			evidence: dedupe(evidence),
+			kind:              kind,
+			resource:          resource,
+			original:          entryRel,
+			evidence:          dedupe(evidence),
+			requiresMigration: requiresMigration,
+		})
+	}
+	return discovered, nil
+}
+
+func discoverCanonicalResources(root string) ([]discoveredResource, error) {
+	candidates := []discoveredResource{}
+	for _, candidate := range []struct {
+		kind string
+		root string
+	}{
+		{kind: "package", root: ".ctxpm/packages"},
+		{kind: "dependency", root: ".ctxpm/dependencies"},
+	} {
+		for _, resourceType := range []string{"skill", "rule", "spec", "prompt", "mcp"} {
+			relDir := filepath.ToSlash(filepath.Join(candidate.root, manifest.TypeDir(resourceType)))
+			discovered, err := discoverCanonicalResourceDir(root, relDir, resourceType, candidate.kind)
+			if err != nil {
+				return nil, err
+			}
+			candidates = append(candidates, discovered...)
+		}
+	}
+	return candidates, nil
+}
+
+func discoverCanonicalResourceDir(root, relDir, resourceType, kind string) ([]discoveredResource, error) {
+	absDir := filepath.Join(root, filepath.FromSlash(relDir))
+	entries, err := os.ReadDir(absDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	discovered := []discoveredResource{}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		entryRel := filepath.ToSlash(filepath.Join(relDir, entry.Name()))
+		entryAbs := filepath.Join(absDir, entry.Name())
+		info, err := os.Lstat(entryAbs)
+		if err != nil {
+			return nil, err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			continue
+		}
+		layout := manifest.LayoutFile
+		entryName := entry.Name()
+		if info.IsDir() {
+			layout = manifest.LayoutDir
+			entryName, err = detectDirectoryEntry(entryAbs, resourceType)
+			if err != nil {
+				return nil, err
+			}
+			if entryName == "" {
+				continue
+			}
+		}
+		resource := manifest.Resource{
+			Name:   normalizeResourceName(entry.Name()),
+			Type:   resourceType,
+			Layout: layout,
+			Path:   entryRel,
+			Entry:  entryName,
+		}
+		discovered = append(discovered, discoveredResource{
+			kind:              kind,
+			resource:          resource,
+			original:          entryRel,
+			evidence:          []string{fmt.Sprintf("discovered existing canonical %s resource under %s", kind, relDir)},
+			requiresMigration: false,
 		})
 	}
 	return discovered, nil
@@ -291,10 +384,11 @@ func discoverDocsResources(root string, projectHints []string) ([]discoveredReso
 			Entry:  entry.Name(),
 		}
 		discovered = append(discovered, discoveredResource{
-			kind:     "package",
-			resource: resource,
-			original: entryRel,
-			evidence: append([]string{"detected project-coupled AI document under docs/"}, evidence...),
+			kind:              "package",
+			resource:          resource,
+			original:          entryRel,
+			evidence:          append([]string{"detected project-coupled AI document under docs/"}, evidence...),
+			requiresMigration: true,
 		})
 	}
 	return discovered, nil

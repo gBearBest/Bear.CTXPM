@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 
 	"github.com/gBearBest/Bear.CTXPM/cli/internal/engine"
@@ -68,6 +69,8 @@ func run(args []string) error {
 	case "help", "--help", "-h":
 		printHelp(os.Stdout)
 		return nil
+	case "version", "--version", "-v":
+		return runVersion()
 	case "init":
 		return runInit(app, args[1:])
 	case "add":
@@ -318,6 +321,7 @@ func printHelp(w *os.File) {
 		"  ctxpm <command> [options]",
 		"",
 		"Commands:",
+		"  version        Print CLI version information",
 		"  init           Initialize the current project as a Bear.CTXPM project",
 		"  add            Add and install an external AI resource from a URL",
 		"  install        Install dependencies and repair compatibility links",
@@ -328,6 +332,7 @@ func printHelp(w *os.File) {
 		"  remove         Remove a dependency or package",
 		"",
 		"Examples:",
+		"  ctxpm --version",
 		"  ctxpm init --agent codex",
 		"  ctxpm add https://github.com/example/ai/tree/main/skills/reviewer --type skill",
 		"  ctxpm add https://gitlab.company.com/team/ai-resources.git --type rule --source-path rules/security",
@@ -335,6 +340,43 @@ func printHelp(w *os.File) {
 		"  ctxpm update --all",
 	}
 	fmt.Fprintln(w, strings.Join(lines, "\n"))
+}
+
+func runVersion() error {
+	fmt.Println(cliVersion())
+	return nil
+}
+
+func cliVersion() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "unknown"
+	}
+	version := strings.TrimSpace(info.Main.Version)
+	if version == "" {
+		version = "devel"
+	}
+	revision := buildInfoSetting(info.Settings, "vcs.revision")
+	if revision == "" {
+		return version
+	}
+	short := revision
+	if len(short) > 12 {
+		short = short[:12]
+	}
+	if buildInfoSetting(info.Settings, "vcs.modified") == "true" {
+		return fmt.Sprintf("%s+%s-dirty", version, short)
+	}
+	return fmt.Sprintf("%s+%s", version, short)
+}
+
+func buildInfoSetting(settings []debug.BuildSetting, key string) string {
+	for _, setting := range settings {
+		if setting.Key == key {
+			return setting.Value
+		}
+	}
+	return ""
 }
 
 func reorderArgs(args []string, valueFlags map[string]bool) []string {

@@ -284,6 +284,7 @@ Rules:
 - Compatibility paths point from agent-recognizable discovery locations to canonical `.ctxpm` roots.
 - Record precise paths in `ctxpm.yaml` even when `.gitignore` uses broader ignore rules.
 - `ctxpm install` should repair missing compatibility links for both dependencies and packages.
+- `ctxpm install` should scan existing canonical resources under `.ctxpm/` and register missing entries in `ctxpm.yaml`.
 - `ctxpm install` should also ensure `.gitignore` contains safe compatibility ignore rules for those repaired paths.
 
 ## Editing Rules
