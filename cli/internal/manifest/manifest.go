@@ -215,9 +215,6 @@ func (m *Manifest) Validate() error {
 		if err := dep.validate(m.Version, "dependency"); err != nil {
 			return err
 		}
-		if dep.Source == nil {
-			return fmt.Errorf("dependency %q requires source", dep.Name)
-		}
 	}
 	for _, pkg := range m.Packages {
 		if err := pkg.validate(m.Version, "package"); err != nil {

@@ -21,16 +21,6 @@ Bear.CTXPM의 목표는 AI가 직접 이해하고 실행할 수 있는 통합 �
 https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/main/INSTALL.md 문서의 설명에 따라 이 프로젝트를 검사, 설치, 초기화, 개조하여 AI 의존성과 AI 리소스를 관리하는 Bear.CTXPM 준수 구조로 만들어 주세요.
 ```
 
-> **선택 사항: 수동 관리를 위해 `ctxpm` CLI를 전역 설치하기**
->
-> AI 중심 워크플로 밖에서도 Bear.CTXPM 리소스를 직접 확인하거나 관리하고 싶다면, 보조 `ctxpm` CLI를 사용자 환경에 전역 설치할 수 있습니다.
->
-> ```sh
-> curl -fsSL https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/main/cli/install.sh | sh -s -- --scope global --version latest
-> ```
->
-> 이 단계는 선택 사항입니다. 전역 CLI가 미리 설치되어 있지 않아도 AI agent는 `INSTALL.md`에 따라 설치와 관리 흐름을 계속 진행할 수 있습니다.
-
 ## 핵심 목표
 
 Bear.CTXPM v0.1은 먼저 프로토콜이며, 반드시 설치해야 하는 도구가 아닙니다. 다음 사항에 집중합니다.

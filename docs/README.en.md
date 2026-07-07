@@ -21,16 +21,6 @@ Bear.CTXPM aims to provide a unified convention that AI can directly understand 
 Please follow the instructions in https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/main/INSTALL.md to inspect, install, initialize, and refactor this project into a Bear.CTXPM-compliant structure for managing AI dependencies and resources.
 ```
 
-> **Optional: install the `ctxpm` CLI globally for manual management**
->
-> If you also want to inspect or manage Bear.CTXPM resources manually outside AI-driven workflows, you can install the companion `ctxpm` CLI globally:
->
-> ```sh
-> curl -fsSL https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/main/cli/install.sh | sh -s -- --scope global --version latest
-> ```
->
-> This is optional. AI agents can still follow `INSTALL.md` without a preinstalled global CLI.
-
 ## Core Goals
 
 Bear.CTXPM v0.1 is first a protocol, not a tool that must be installed. It focuses on:

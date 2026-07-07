@@ -125,6 +125,8 @@ packages:
     layout: file
     path: .ctxpm/packages/rules/project-resource.md
     entry: project-resource.md
+    compatibility:
+      - .agents/rules/project-resource.md
 
 entrypoints:
   codex:
@@ -138,9 +140,10 @@ entrypoints:
 
 1. Classify the resource as `dependency` or `package`.
 2. Install the canonical resource root under `.ctxpm/dependencies/` or `.ctxpm/packages/`.
-3. Record `layout`, `path`, and `entry`.
+3. Record `layout`, `path`, `entry`, and any required `compatibility` paths.
 4. For dependencies, record `source` and `version`.
 5. Repair compatibility exposure paths.
+6. Ensure `.gitignore` includes safe ignore rules for repaired compatibility paths.
 
 ### Validate
 

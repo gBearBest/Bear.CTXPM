@@ -21,16 +21,6 @@ Bear.CTXPM の目的は、AI が直接理解して実行できる統一された
 https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/main/INSTALL.md の説明に従って、このプロジェクトを検査、インストール、初期化、改造し、AI 依存関係と AI リソースを管理する Bear.CTXPM 準拠の構造にしてください。
 ```
 
-> **任意: 手動管理のために `ctxpm` CLI をグローバルインストールする**
->
-> AI 主導のワークフロー以外でも Bear.CTXPM リソースを手動で確認または管理したい場合は、付属の `ctxpm` CLI をグローバルにインストールできます。
->
-> ```sh
-> curl -fsSL https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/main/cli/install.sh | sh -s -- --scope global --version latest
-> ```
->
-> これは任意です。グローバル CLI を事前にインストールしていなくても、AI agent は `INSTALL.md` に従ってセットアップと管理を進められます。
-
 ## コア目標
 
 Bear.CTXPM v0.1 は、まずプロトコルであり、必ずインストールしなければならないツールではありません。主に次の点に焦点を当てます。

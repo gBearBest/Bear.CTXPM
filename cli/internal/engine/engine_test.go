@@ -60,6 +60,210 @@ func TestInstallRepairsPackageCompatibility(t *testing.T) {
 	}
 }
 
+func TestInstallRepairsDependencyCompatibilityWithoutSource(t *testing.T) {
+	root := t.TempDir()
+	dependencyPath := ".ctxpm/dependencies/rules/shared-rule.md"
+	compatPath := ".agents/rules/shared-rule.md"
+	if err := os.MkdirAll(filepath.Join(root, ".ctxpm/dependencies/rules"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(dependencyPath)), []byte("shared\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version: 2,
+		Project: manifest.Project{Name: "sample"},
+		Agents:  []string{"generic"},
+		Dependencies: []manifest.Resource{
+			{
+				Name:          "shared-rule",
+				Type:          "rule",
+				Layout:        manifest.LayoutFile,
+				Path:          dependencyPath,
+				Entry:         "shared-rule.md",
+				Compatibility: []string{compatPath},
+			},
+		},
+	})
+
+	app := New(root)
+	result, err := app.Install(context.Background(), InstallOptions{Only: "shared-rule"})
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if len(result.Actions) != 1 {
+		t.Fatalf("Install() actions = %d, want 1", len(result.Actions))
+	}
+	if result.Actions[0].Kind != "dependency" || result.Actions[0].Status != "linked" {
+		t.Fatalf("Install() action = %+v", result.Actions[0])
+	}
+
+	linkPath := filepath.Join(root, filepath.FromSlash(compatPath))
+	target, err := os.Readlink(linkPath)
+	if err != nil {
+		t.Fatalf("Readlink() error = %v", err)
+	}
+	if target != "../../.ctxpm/dependencies/rules/shared-rule.md" {
+		t.Fatalf("compat symlink = %q", target)
+	}
+}
+
+func TestInstallUpdatesGitignoreForCompatibilityDirectories(t *testing.T) {
+	root := t.TempDir()
+	packagePath := ".ctxpm/packages/rules/project-review.md"
+	if err := os.MkdirAll(filepath.Join(root, ".ctxpm/packages/rules"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(packagePath)), []byte("project review\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version: 2,
+		Project: manifest.Project{Name: "sample"},
+		Agents:  []string{"generic"},
+		Packages: []manifest.Resource{
+			{
+				Name:          "project-review",
+				Type:          "rule",
+				Layout:        manifest.LayoutFile,
+				Path:          packagePath,
+				Entry:         "project-review.md",
+				Compatibility: []string{".agents/rules/project-review.md"},
+			},
+		},
+	})
+
+	app := New(root)
+	if _, err := app.Install(context.Background(), InstallOptions{Only: "project-review"}); err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+
+	gitignore := readFileForTest(t, filepath.Join(root, ".gitignore"))
+	for _, rule := range []string{".ctxpm/dependencies/", ".ctxpm/state/", ".agents/rules/"} {
+		if !strings.Contains(gitignore, rule+"\n") {
+			t.Fatalf(".gitignore missing %q:\n%s", rule, gitignore)
+		}
+	}
+}
+
+func TestInstallIndexesCanonicalPackageFromCtxpmDirectory(t *testing.T) {
+	root := t.TempDir()
+	packageRoot := filepath.Join(root, ".ctxpm", "packages", "skills", "ctxpm-release")
+	if err := os.MkdirAll(packageRoot, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(packageRoot, "SKILL.md"), []byte("# release\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version:      2,
+		Project:      manifest.Project{Name: "sample"},
+		Agents:       []string{"generic"},
+		Dependencies: []manifest.Resource{},
+		Packages:     []manifest.Resource{},
+	})
+
+	app := New(root)
+	result, err := app.Install(context.Background(), InstallOptions{Only: "ctxpm-release"})
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if len(result.Actions) != 1 {
+		t.Fatalf("Install() actions = %d, want 1", len(result.Actions))
+	}
+	if result.Actions[0].Kind != "package" || result.Actions[0].Status != "linked" {
+		t.Fatalf("Install() action = %+v", result.Actions[0])
+	}
+
+	loaded, _, err := manifest.Load(root)
+	if err != nil {
+		t.Fatalf("manifest.Load() error = %v", err)
+	}
+	found := false
+	for _, pkg := range loaded.Packages {
+		if pkg.Name != "ctxpm-release" {
+			continue
+		}
+		found = true
+		if pkg.Path != ".ctxpm/packages/skills/ctxpm-release" {
+			t.Fatalf("package path = %q", pkg.Path)
+		}
+		if !hasString(pkg.Compatibility, ".agents/skills/ctxpm-release") {
+			t.Fatalf("package compatibility = %v", pkg.Compatibility)
+		}
+		break
+	}
+	if !found {
+		t.Fatalf("packages = %+v", loaded.Packages)
+	}
+	target, err := os.Readlink(filepath.Join(root, ".agents", "skills", "ctxpm-release"))
+	if err != nil {
+		t.Fatalf("Readlink() error = %v", err)
+	}
+	if target != "../../.ctxpm/packages/skills/ctxpm-release" {
+		t.Fatalf("compat symlink = %q", target)
+	}
+}
+
+func TestInstallIndexesCanonicalDependencyFromCtxpmDirectory(t *testing.T) {
+	root := t.TempDir()
+	dependencyRoot := filepath.Join(root, ".ctxpm", "dependencies", "rules")
+	if err := os.MkdirAll(dependencyRoot, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dependencyRoot, "shared-rule.md"), []byte("shared rule\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version:      2,
+		Project:      manifest.Project{Name: "sample"},
+		Agents:       []string{"generic"},
+		Dependencies: []manifest.Resource{},
+		Packages:     []manifest.Resource{},
+	})
+
+	app := New(root)
+	result, err := app.Install(context.Background(), InstallOptions{Only: "shared-rule"})
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if len(result.Actions) != 1 {
+		t.Fatalf("Install() actions = %d, want 1", len(result.Actions))
+	}
+	if result.Actions[0].Kind != "dependency" || result.Actions[0].Status != "linked" {
+		t.Fatalf("Install() action = %+v", result.Actions[0])
+	}
+
+	loaded, _, err := manifest.Load(root)
+	if err != nil {
+		t.Fatalf("manifest.Load() error = %v", err)
+	}
+	found := false
+	for _, dep := range loaded.Dependencies {
+		if dep.Name != "shared-rule" {
+			continue
+		}
+		found = true
+		if dep.Path != ".ctxpm/dependencies/rules/shared-rule.md" {
+			t.Fatalf("dependency path = %q", dep.Path)
+		}
+		if !hasString(dep.Compatibility, ".agents/rules/shared-rule.md") {
+			t.Fatalf("dependency compatibility = %v", dep.Compatibility)
+		}
+		break
+	}
+	if !found {
+		t.Fatalf("dependencies = %+v", loaded.Dependencies)
+	}
+	target, err := os.Readlink(filepath.Join(root, ".agents", "rules", "shared-rule.md"))
+	if err != nil {
+		t.Fatalf("Readlink() error = %v", err)
+	}
+	if target != "../../.ctxpm/dependencies/rules/shared-rule.md" {
+		t.Fatalf("compat symlink = %q", target)
+	}
+}
+
 func TestInitCreatesV2Manifest(t *testing.T) {
 	root := t.TempDir()
 	app := New(root)
@@ -114,6 +318,44 @@ func TestInitCreatesV2Manifest(t *testing.T) {
 	}
 	if target != "../../.ctxpm/dependencies/skills/ctxpm" {
 		t.Fatalf("compat symlink = %q", target)
+	}
+}
+
+func TestInitUpdatesGitignoreForExistingCompatibilityPaths(t *testing.T) {
+	root := t.TempDir()
+	packagePath := ".ctxpm/packages/rules/project-review.md"
+	if err := os.MkdirAll(filepath.Join(root, ".ctxpm/packages/rules"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(packagePath)), []byte("project review\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version: 2,
+		Project: manifest.Project{Name: "sample"},
+		Agents:  []string{"generic"},
+		Packages: []manifest.Resource{
+			{
+				Name:          "project-review",
+				Type:          "rule",
+				Layout:        manifest.LayoutFile,
+				Path:          packagePath,
+				Entry:         "project-review.md",
+				Compatibility: []string{".agents/rules/project-review.md"},
+			},
+		},
+	})
+
+	app := New(root)
+	if _, err := app.Init(InitOptions{Agent: "generic"}); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+
+	gitignore := readFileForTest(t, filepath.Join(root, ".gitignore"))
+	for _, rule := range []string{".ctxpm/dependencies/", ".ctxpm/state/", ".agents/rules/"} {
+		if !strings.Contains(gitignore, rule+"\n") {
+			t.Fatalf(".gitignore missing %q:\n%s", rule, gitignore)
+		}
 	}
 }
 
@@ -340,6 +582,108 @@ func TestInitMigratesExistingSkillDirectoryIntoPackages(t *testing.T) {
 		t.Fatalf("compat symlink = %q", target)
 	}
 }
+
+func TestInitRegistersExistingCanonicalPackageFromCtxpmDirectory(t *testing.T) {
+	root := t.TempDir()
+	packagePath := filepath.Join(root, ".ctxpm", "packages", "skills", "ctxpm-release")
+	if err := os.MkdirAll(packagePath, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(packagePath, "SKILL.md"), []byte("# release\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	app := New(root)
+	result, err := app.Init(InitOptions{Agent: "generic"})
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	if !hasString(result.PackagesCreated, "ctxpm-release") {
+		t.Fatalf("PackagesCreated = %v", result.PackagesCreated)
+	}
+	if hasString(result.MigratedResources, ".ctxpm/packages/skills/ctxpm-release") {
+		t.Fatalf("MigratedResources should not include canonical ctxpm path: %v", result.MigratedResources)
+	}
+
+	loaded, _, err := manifest.Load(root)
+	if err != nil {
+		t.Fatalf("manifest.Load() error = %v", err)
+	}
+	found := false
+	for _, pkg := range loaded.Packages {
+		if pkg.Name != "ctxpm-release" {
+			continue
+		}
+		found = true
+		if pkg.Path != ".ctxpm/packages/skills/ctxpm-release" {
+			t.Fatalf("package path = %q", pkg.Path)
+		}
+		if !hasString(pkg.Compatibility, ".agents/skills/ctxpm-release") {
+			t.Fatalf("package compatibility = %v", pkg.Compatibility)
+		}
+		break
+	}
+	if !found {
+		t.Fatalf("packages = %+v", loaded.Packages)
+	}
+	target, err := os.Readlink(filepath.Join(root, ".agents", "skills", "ctxpm-release"))
+	if err != nil {
+		t.Fatalf("Readlink() error = %v", err)
+	}
+	if target != "../../.ctxpm/packages/skills/ctxpm-release" {
+		t.Fatalf("compat symlink = %q", target)
+	}
+}
+
+func TestInitRegistersExistingCanonicalDependencyFromCtxpmDirectory(t *testing.T) {
+	root := t.TempDir()
+	dependencyPath := filepath.Join(root, ".ctxpm", "dependencies", "rules")
+	if err := os.MkdirAll(dependencyPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dependencyPath, "shared-rule.md"), []byte("follow shared rule\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	app := New(root)
+	result, err := app.Init(InitOptions{Agent: "generic"})
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	if !hasString(result.DependenciesCreated, "shared-rule") {
+		t.Fatalf("DependenciesCreated = %v", result.DependenciesCreated)
+	}
+
+	loaded, _, err := manifest.Load(root)
+	if err != nil {
+		t.Fatalf("manifest.Load() error = %v", err)
+	}
+	found := false
+	for _, dep := range loaded.Dependencies {
+		if dep.Name != "shared-rule" {
+			continue
+		}
+		found = true
+		if dep.Path != ".ctxpm/dependencies/rules/shared-rule.md" {
+			t.Fatalf("dependency path = %q", dep.Path)
+		}
+		if !hasString(dep.Compatibility, ".agents/rules/shared-rule.md") {
+			t.Fatalf("dependency compatibility = %v", dep.Compatibility)
+		}
+		break
+	}
+	if !found {
+		t.Fatalf("dependencies = %+v", loaded.Dependencies)
+	}
+	target, err := os.Readlink(filepath.Join(root, ".agents", "rules", "shared-rule.md"))
+	if err != nil {
+		t.Fatalf("Readlink() error = %v", err)
+	}
+	if target != "../../.ctxpm/dependencies/rules/shared-rule.md" {
+		t.Fatalf("compat symlink = %q", target)
+	}
+}
+
 func TestValidateReportsMissingPackageCompatibility(t *testing.T) {
 	root := t.TempDir()
 	packagePath := ".ctxpm/packages/skills/ctxpm-release"

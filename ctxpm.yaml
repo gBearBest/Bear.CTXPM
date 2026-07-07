@@ -1,36 +1,41 @@
-version: 1
-
+version: 2
 project:
-  name: gBear.CTXPM
-
+  name: Bear.CTXPM
 agents:
   - generic
-
 update_policy:
   enabled: true
   interval: 1d
   include_self: true
-
 dependencies:
   - name: ctxpm
     type: skill
+    layout: dir
     path: .ctxpm/dependencies/skills/ctxpm
+    entry: SKILL.md
     source:
       type: git
       url: https://github.com/gBearBest/Bear.CTXPM
-      ref: develop
-      path: docs/ctxpm-skill.md
-    version: c502ab4ecd5d3583913e5157189cda753d1b11ef
+      path: resources/skills/ctxpm
+      entry: SKILL.md
+    version: 1b194b5766c46bf6f1b39a76b446170a7e7c244e
     compatibility:
       - .agents/skills/ctxpm
-
 packages:
   - name: ctxpm-release
     type: skill
+    layout: dir
     path: .ctxpm/packages/skills/ctxpm-release
+    entry: SKILL.md
     compatibility:
       - .agents/skills/ctxpm-release
-
+  - name: ctxpm-source-boundary
+    type: rule
+    layout: file
+    path: .ctxpm/packages/rules/ctxpm-source-boundary.md
+    entry: ctxpm-source-boundary.md
+    compatibility:
+      - .agents/rules/ctxpm-source-boundary.md
 entrypoints:
   generic:
     file: AGENTS.md
