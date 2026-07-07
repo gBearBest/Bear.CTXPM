@@ -863,6 +863,11 @@ func (a *App) Update(ctx context.Context, opts UpdateOptions) (*UpdateResult, er
 			result.Skipped = append(result.Skipped, UpdateAction{Name: dep.Name, Status: updateInfo.Status, Reason: updateInfo.Reason})
 		}
 	}
+	if !opts.DryRun {
+		if err := refreshManagedEntrypoints(a.Root, m, false); err != nil {
+			return nil, err
+		}
+	}
 	if !opts.DryRun && len(versionUpdates) > 0 {
 		if _, err := manifest.UpdateResourceVersions(a.Root, versionUpdates); err != nil {
 			return nil, err
