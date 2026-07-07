@@ -31,7 +31,7 @@ jobs:
 
       - name: Run tests
         working-directory: cli
-        run: go test ./...
+        run: make test
 
   release-metadata:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -109,6 +109,7 @@ jobs:
           mkdir -p "$STAGING_DIR" "$OUTPUT_DIR"
 
           pushd cli >/dev/null
+          make generate
           CGO_ENABLED=0 GOOS="${{ matrix.goos }}" GOARCH="${{ matrix.goarch }}" \
             go build -trimpath -ldflags="-s -w" -o "$STAGING_DIR/${{ matrix.binary_name }}" .
           popd >/dev/null
