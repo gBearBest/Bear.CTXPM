@@ -72,12 +72,16 @@ However, when the official companion `ctxpm` CLI is available, install or prepar
 
 - `ctxpm init`
 - `ctxpm install`
+- `ctxpm detect`
+- `ctxpm migrate`
 - `ctxpm add`
 - `ctxpm list`
 - `ctxpm check-updates`
 - `ctxpm update`
 - `ctxpm remove`
 - `ctxpm validate`
+
+During normal AI work, run `ctxpm detect` more frequently than `ctxpm check-updates` so newly added AI resources outside ctxpm-managed roots are caught early, then ask the user before migrating them and verify the result with `ctxpm validate`.
 
 During installation, do not make the AI manually recreate deterministic scaffolding that the project-local `ctxpm` CLI can generate and verify on its own. Use the local CLI first for fixed bootstrap work, then let the AI inspect the output, validate the resulting state, and handle unresolved ownership or migration decisions.
 
@@ -415,7 +419,7 @@ Install the complete format document as the `ctxpm` skill companion file at `.ct
 Reference template for `ctxpm.yaml`:
 
 ```yaml
-version: 2
+version: 1.0
 
 project:
   name: your-project-name
@@ -499,32 +503,8 @@ dependencies:
 
 Write or update the managed `ctxpm` block in the entrypoint file for the selected agent.
 
-The managed block must use this canonical template:
-
-```md
-<!-- ctxpm:begin agent=<agent-id> -->
-This project uses `ctxpm` to manage AI resources.
-
-Read AI resources in this order:
-1. Read `ctxpm.yaml`.
-2. Read `.ctxpm/packages/` before `.ctxpm/dependencies/`.
-3. Within each root, use this default lookup order:
-   - `rules`
-   - `skills`
-   - `specs`
-   - `prompts`
-   - `mcp`
-4. When resources conflict, project-local `packages` take precedence over external `dependencies`.
-
-Do not install AI resources directly into agent default locations. Before creating, reading, updating, or deleting any AI resource, use the companion `ctxpm` CLI when it is available. If the CLI is unavailable, use the `ctxpm` skill if it is available. Otherwise follow the same `ctxpm` classification, migration, compatibility-symlink, `.gitignore`, source-version, update-detection, and `ctxpm.yaml` update rules used by this project.
-
-Install new external AI resources as `dependency` resources under `.ctxpm/dependencies/`, not as project-local `package` resources, unless the user explicitly confirms they should become project-maintained assets. For GitHub or direct URL resources, record the hash-based `version` in `ctxpm.yaml`.
-
-Install new project-local AI resources as `package` resources under `.ctxpm/packages/` and record them in `ctxpm.yaml`.
-
-Expose the bundled `ctxpm` dependency through this agent's default skill discovery compatibility path or paths so the agent can discover and invoke it through its normal skill or command surface. Subsequent AI resources should be installed and managed through the companion `ctxpm` CLI when it is available, or through the `ctxpm` skill when the CLI is unavailable. Both paths must keep canonical content under `.ctxpm/...` and record the required compatibility paths for each declared agent and resource type.
-<!-- ctxpm:end -->
-```
+The managed block must use the canonical template in
+[`resources/templates/ctxpm-managed-entrypoint.md`](resources/templates/ctxpm-managed-entrypoint.md).
 
 Template rules:
 

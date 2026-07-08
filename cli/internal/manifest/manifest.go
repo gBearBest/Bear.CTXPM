@@ -18,8 +18,7 @@ import (
 const manifestIndent = 2
 
 const (
-	ManifestVersion1 = 1
-	ManifestVersion2 = 2
+	CurrentManifestVersion = "1.0"
 
 	LayoutFile = "file"
 	LayoutDir  = "dir"
@@ -41,7 +40,7 @@ var validTypes = map[string]bool{
 }
 
 type Manifest struct {
-	Version      int                   `yaml:"version"`
+	Version      string                `yaml:"version"`
 	Project      Project               `yaml:"project"`
 	Agents       []string              `yaml:"agents,omitempty"`
 	UpdatePolicy UpdatePolicy          `yaml:"update_policy,omitempty"`
@@ -123,8 +122,18 @@ func Save(root string, m *Manifest) (string, error) {
 	return manifestPath, os.WriteFile(manifestPath, data, 0o644)
 }
 
+func SyncVersion(root string) (bool, error) {
+	return updateManifestVersion(root, CurrentManifestVersion)
+}
+
 func marshalManifest(m *Manifest) ([]byte, error) {
-	return marshalYAML(m)
+	data, err := marshalYAML(m)
+	if err != nil {
+		return nil, err
+	}
+	quoted := fmt.Sprintf("version: %q\n", m.Version)
+	plain := "version: " + m.Version + "\n"
+	return []byte(strings.Replace(string(data), quoted, plain, 1)), nil
 }
 
 func UpdateResourceVersions(root string, versions map[string]string) (bool, error) {
@@ -184,6 +193,33 @@ func UpdateResourceVersions(root string, versions map[string]string) (bool, erro
 	return true, os.WriteFile(manifestPath, []byte(text.String()), 0o644)
 }
 
+func updateManifestVersion(root, nextVersion string) (bool, error) {
+	manifestPath, text, rootNode, err := loadManifestDocument(root)
+	if err != nil {
+		return false, err
+	}
+	if rootNode.Kind != yaml.MappingNode {
+		return false, errors.New("ctxpm manifest root must be a mapping")
+	}
+
+	versionValue := mappingValue(rootNode, "version")
+	if versionValue != nil && strings.TrimSpace(versionValue.Value) == nextVersion {
+		return false, nil
+	}
+
+	if versionValue != nil {
+		updatedLine, err := replaceScalarOnLine(text.lines[versionValue.Line-1], versionValue.Column, nextVersion)
+		if err != nil {
+			return false, err
+		}
+		text.lines[versionValue.Line-1] = updatedLine
+		return true, os.WriteFile(manifestPath, []byte(text.String()), 0o644)
+	}
+
+	text.lines = insertLine(text.lines, 0, "version: "+nextVersion)
+	return true, os.WriteFile(manifestPath, []byte(text.String()), 0o644)
+}
+
 func AddDependency(root string, resource Resource) (bool, error) {
 	return addResource(root, "dependencies", resource, true)
 }
@@ -197,11 +233,11 @@ func RemovePackage(root, name string) (bool, error) {
 }
 
 func (m *Manifest) Validate() error {
-	if m.Version == 0 {
-		m.Version = ManifestVersion2
+	if strings.TrimSpace(m.Version) == "" {
+		m.Version = CurrentManifestVersion
 	}
-	if m.Version != ManifestVersion1 && m.Version != ManifestVersion2 {
-		return fmt.Errorf("unsupported ctxpm.yaml version %d", m.Version)
+	if m.Version != CurrentManifestVersion {
+		return fmt.Errorf("unsupported ctxpm.yaml version %s", m.Version)
 	}
 	if strings.TrimSpace(m.Project.Name) == "" {
 		return errors.New("project.name is required")
@@ -212,12 +248,12 @@ func (m *Manifest) Validate() error {
 		}
 	}
 	for _, dep := range m.Dependencies {
-		if err := dep.validate(m.Version, "dependency"); err != nil {
+		if err := dep.validate("dependency"); err != nil {
 			return err
 		}
 	}
 	for _, pkg := range m.Packages {
-		if err := pkg.validate(m.Version, "package"); err != nil {
+		if err := pkg.validate("package"); err != nil {
 			return err
 		}
 	}
@@ -225,10 +261,10 @@ func (m *Manifest) Validate() error {
 }
 
 func (r Resource) Validate(kind string) error {
-	return r.validate(ManifestVersion1, kind)
+	return r.validate(kind)
 }
 
-func (r Resource) validate(version int, kind string) error {
+func (r Resource) validate(kind string) error {
 	if strings.TrimSpace(r.Name) == "" {
 		return fmt.Errorf("%s name is required", kind)
 	}
@@ -245,26 +281,26 @@ func (r Resource) validate(version int, kind string) error {
 	if !strings.HasPrefix(filepath.ToSlash(r.Path), prefix) {
 		return fmt.Errorf("%s %q path %q must stay under %s", kind, r.Name, r.Path, prefix)
 	}
-	if version >= ManifestVersion2 {
-		if r.Layout != LayoutFile && r.Layout != LayoutDir {
-			return fmt.Errorf("%s %q has unsupported layout %q", kind, r.Name, r.Layout)
+	layout := r.EffectiveLayout()
+	entry := r.EffectiveEntry()
+	if layout != LayoutFile && layout != LayoutDir {
+		return fmt.Errorf("%s %q has unsupported layout %q", kind, r.Name, r.Layout)
+	}
+	if err := validateRelativePath(entry, fmt.Sprintf("%s %q entry", kind, r.Name)); err != nil {
+		return err
+	}
+	switch layout {
+	case LayoutFile:
+		if filepath.Base(filepath.FromSlash(r.Path)) != filepath.Base(filepath.FromSlash(entry)) {
+			return fmt.Errorf("%s %q entry %q must match file path %q", kind, r.Name, entry, r.Path)
 		}
-		if err := validateRelativePath(r.Entry, fmt.Sprintf("%s %q entry", kind, r.Name)); err != nil {
-			return err
-		}
-		switch r.Layout {
-		case LayoutFile:
-			if filepath.Base(filepath.FromSlash(r.Path)) != filepath.Base(filepath.FromSlash(r.Entry)) {
-				return fmt.Errorf("%s %q entry %q must match file path %q", kind, r.Name, r.Entry, r.Path)
-			}
-		case LayoutDir:
-			if pathIsFileLike(r.Entry) == false && strings.TrimSpace(r.Entry) == "" {
-				return fmt.Errorf("%s %q directory resources require entry", kind, r.Name)
-			}
+	case LayoutDir:
+		if strings.TrimSpace(entry) == "" {
+			return fmt.Errorf("%s %q directory resources require entry", kind, r.Name)
 		}
 	}
 	if r.Source != nil {
-		if err := r.Source.validate(version, kind, r); err != nil {
+		if err := r.Source.validate(kind, r); err != nil {
 			return err
 		}
 	}
@@ -332,7 +368,7 @@ func (r Resource) EntryPath() string {
 	}
 }
 
-func (s Source) validate(version int, kind string, resource Resource) error {
+func (s Source) validate(kind string, resource Resource) error {
 	sourceType := s.NormalizedType()
 	switch sourceType {
 	case "git":
@@ -342,50 +378,40 @@ func (s Source) validate(version int, kind string, resource Resource) error {
 		if strings.TrimSpace(s.Path) == "" {
 			return fmt.Errorf("%s %q git source is missing path", kind, resource.Name)
 		}
-		if version >= ManifestVersion2 {
-			if err := validateRelativePath(s.Path, fmt.Sprintf("%s %q git source.path", kind, resource.Name)); err != nil {
-				return err
-			}
-			if err := validateRelativePath(s.Entry, fmt.Sprintf("%s %q git source.entry", kind, resource.Name)); err != nil {
-				return err
-			}
+		if err := validateRelativePath(s.Path, fmt.Sprintf("%s %q git source.path", kind, resource.Name)); err != nil {
+			return err
+		}
+		if err := validateRelativePath(s.Entry, fmt.Sprintf("%s %q git source.entry", kind, resource.Name)); err != nil {
+			return err
 		}
 	case "url":
 		if strings.TrimSpace(s.URL) == "" {
 			return fmt.Errorf("%s %q url source is missing url", kind, resource.Name)
 		}
-		if version == ManifestVersion1 && strings.TrimSpace(s.Entry) == "" {
-			return fmt.Errorf("%s %q url source is missing entry", kind, resource.Name)
+		if err := validateRelativePath(s.Entry, fmt.Sprintf("%s %q url source.entry", kind, resource.Name)); err != nil {
+			return err
 		}
-		if version >= ManifestVersion2 {
-			if err := validateRelativePath(s.Entry, fmt.Sprintf("%s %q url source.entry", kind, resource.Name)); err != nil {
-				return err
+		if len(s.Files) > 0 {
+			if resource.EffectiveLayout() != LayoutDir {
+				return fmt.Errorf("%s %q url source.files requires layout dir", kind, resource.Name)
 			}
-			if len(s.Files) > 0 {
-				if resource.EffectiveLayout() != LayoutDir {
-					return fmt.Errorf("%s %q url source.files requires layout dir", kind, resource.Name)
+			seen := map[string]bool{}
+			for _, file := range s.Files {
+				if err := validateRelativePath(file, fmt.Sprintf("%s %q url source.files entry", kind, resource.Name)); err != nil {
+					return err
 				}
-				seen := map[string]bool{}
-				for _, file := range s.Files {
-					if err := validateRelativePath(file, fmt.Sprintf("%s %q url source.files entry", kind, resource.Name)); err != nil {
-						return err
-					}
-					if seen[file] {
-						return fmt.Errorf("%s %q url source.files contains duplicate %q", kind, resource.Name, file)
-					}
-					seen[file] = true
+				if seen[file] {
+					return fmt.Errorf("%s %q url source.files contains duplicate %q", kind, resource.Name, file)
 				}
-				if !seen[s.Entry] {
-					return fmt.Errorf("%s %q url source.entry %q must be listed in source.files", kind, resource.Name, s.Entry)
-				}
-			} else if resource.EffectiveLayout() != LayoutFile {
-				return fmt.Errorf("%s %q single-file url source requires layout file", kind, resource.Name)
+				seen[file] = true
 			}
+			if !seen[s.Entry] {
+				return fmt.Errorf("%s %q url source.entry %q must be listed in source.files", kind, resource.Name, s.Entry)
+			}
+		} else if resource.EffectiveLayout() != LayoutFile {
+			return fmt.Errorf("%s %q single-file url source requires layout file", kind, resource.Name)
 		}
 	case "archive":
-		if version < ManifestVersion2 {
-			return fmt.Errorf("%s %q uses unsupported source.type %q", kind, resource.Name, s.Type)
-		}
 		if strings.TrimSpace(s.URL) == "" {
 			return fmt.Errorf("%s %q archive source is missing url", kind, resource.Name)
 		}
@@ -454,29 +480,7 @@ func EntrypointFile(agent string) string {
 }
 
 func ManagedEntrypoint(agent string) string {
-	return fmt.Sprintf(`<!-- ctxpm:begin agent=%s -->
-This project uses `+"`ctxpm`"+` to manage AI resources.
-
-Read AI resources in this order:
-1. Read `+"`ctxpm.yaml`"+`.
-2. Read `+"`.ctxpm/packages/`"+` before `+"`.ctxpm/dependencies/`"+`.
-3. Within each root, use this default lookup order:
-   - `+"`rules`"+`
-   - `+"`skills`"+`
-   - `+"`specs`"+`
-   - `+"`prompts`"+`
-   - `+"`mcp`"+`
-4. When resources conflict, project-local `+"`packages`"+` take precedence over external `+"`dependencies`"+`.
-
-Do not install AI resources directly into agent default locations. Before creating, reading, updating, or deleting any AI resource, use the companion `+"`ctxpm`"+` CLI when it is available. If the CLI is unavailable, use the `+"`ctxpm`"+` skill if it is available. Otherwise follow the same `+"`ctxpm`"+` classification, migration, compatibility-symlink, `+"`.gitignore`"+`, source-version, update-detection, and `+"`ctxpm.yaml`"+` update rules used by this project.
-
-Install new external AI resources as `+"`dependency`"+` resources under `+"`.ctxpm/dependencies/`"+`, not as project-local `+"`package`"+` resources, unless the user explicitly confirms they should become project-maintained assets. For GitHub or direct URL resources, record the hash-based `+"`version`"+` in `+"`ctxpm.yaml`"+`.
-
-Install new project-local AI resources as `+"`package`"+` resources under `+"`.ctxpm/packages/`"+` and record them in `+"`ctxpm.yaml`"+`.
-
-Expose the bundled `+"`ctxpm`"+` dependency through this agent's default skill discovery compatibility path or paths so the agent can discover and invoke it through its normal skill or command surface. Subsequent AI resources should be installed and managed through the companion `+"`ctxpm`"+` CLI when it is available, or through the `+"`ctxpm`"+` skill when the CLI is unavailable. Both paths must keep canonical content under `+"`.ctxpm/...`"+` and record the required compatibility paths for each declared agent and resource type.
-<!-- ctxpm:end -->
-`, agent)
+	return strings.Replace(managedEntrypointTemplate, "<agent-id>", agent, 1)
 }
 
 func (m *Manifest) HasResource(name string) bool {
