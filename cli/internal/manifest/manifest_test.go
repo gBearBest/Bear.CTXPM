@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestValidateV2MultiFileURLResource(t *testing.T) {
+func TestValidateCurrentVersionMultiFileURLResource(t *testing.T) {
 	resource := Resource{
 		Name:   "reviewer",
 		Type:   "skill",
@@ -20,12 +20,12 @@ func TestValidateV2MultiFileURLResource(t *testing.T) {
 			Files: []string{"SKILL.md", "rules/review.md"},
 		},
 	}
-	if err := resource.validate(ManifestVersion2, "dependency"); err != nil {
+	if err := resource.validate("dependency"); err != nil {
 		t.Fatalf("validate() error = %v", err)
 	}
 }
 
-func TestValidateV2RejectsSingleFileURLDirectoryLayout(t *testing.T) {
+func TestValidateCurrentVersionRejectsSingleFileURLDirectoryLayout(t *testing.T) {
 	resource := Resource{
 		Name:   "reviewer",
 		Type:   "skill",
@@ -38,7 +38,7 @@ func TestValidateV2RejectsSingleFileURLDirectoryLayout(t *testing.T) {
 			Entry: "SKILL.md",
 		},
 	}
-	if err := resource.validate(ManifestVersion2, "dependency"); err == nil {
+	if err := resource.validate("dependency"); err == nil {
 		t.Fatalf("validate() error = nil, want rejection")
 	}
 }
@@ -46,7 +46,7 @@ func TestValidateV2RejectsSingleFileURLDirectoryLayout(t *testing.T) {
 func TestSaveUsesTwoSpaceIndent(t *testing.T) {
 	root := t.TempDir()
 	m := &Manifest{
-		Version: 1,
+		Version: CurrentManifestVersion,
 		Project: Project{Name: "sample"},
 		Agents:  []string{"generic"},
 		UpdatePolicy: UpdatePolicy{
@@ -68,7 +68,7 @@ func TestSaveUsesTwoSpaceIndent(t *testing.T) {
 
 	got := readManifest(t, root)
 	want := "" +
-		"version: 1\n" +
+		"version: 1.0\n" +
 		"project:\n" +
 		"  name: sample\n" +
 		"agents:\n" +
@@ -86,10 +86,40 @@ func TestSaveUsesTwoSpaceIndent(t *testing.T) {
 	}
 }
 
+func TestSyncVersionRewritesTopLevelVersion(t *testing.T) {
+	root := t.TempDir()
+	original := "" +
+		"version: 2\n" +
+		"project:\n" +
+		"  name: sample\n" +
+		"dependencies: []\n" +
+		"packages: []\n"
+	writeManifest(t, root, original)
+
+	changed, err := SyncVersion(root)
+	if err != nil {
+		t.Fatalf("SyncVersion() error = %v", err)
+	}
+	if !changed {
+		t.Fatalf("SyncVersion() changed = false, want true")
+	}
+
+	got := readManifest(t, root)
+	want := "" +
+		"version: 1.0\n" +
+		"project:\n" +
+		"  name: sample\n" +
+		"dependencies: []\n" +
+		"packages: []\n"
+	if got != want {
+		t.Fatalf("SyncVersion() wrote unexpected YAML\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
 func TestUpdateResourceVersionsNoChangeLeavesManifestUntouched(t *testing.T) {
 	root := t.TempDir()
 	original := "" +
-		"version: 1\n" +
+		"version: 1.0\n" +
 		"\n" +
 		"project:\n" +
 		"  name: sample\n" +
@@ -124,7 +154,7 @@ func TestUpdateResourceVersionsNoChangeLeavesManifestUntouched(t *testing.T) {
 func TestUpdateResourceVersionsReplacesOnlyVersionValue(t *testing.T) {
 	root := t.TempDir()
 	original := "" +
-		"version: 1\n" +
+		"version: 1.0\n" +
 		"\n" +
 		"# project comment\n" +
 		"project:\n" +
@@ -144,7 +174,7 @@ func TestUpdateResourceVersionsReplacesOnlyVersionValue(t *testing.T) {
 		"\n" +
 		"packages: []\n"
 	expected := "" +
-		"version: 1\n" +
+		"version: 1.0\n" +
 		"\n" +
 		"# project comment\n" +
 		"project:\n" +
@@ -182,7 +212,7 @@ func TestUpdateResourceVersionsReplacesOnlyVersionValue(t *testing.T) {
 func TestUpdateResourceVersionsInsertsMissingVersionBeforeCompatibility(t *testing.T) {
 	root := t.TempDir()
 	original := "" +
-		"version: 1\n" +
+		"version: 1.0\n" +
 		"project:\n" +
 		"  name: sample\n" +
 		"dependencies:\n" +
@@ -197,7 +227,7 @@ func TestUpdateResourceVersionsInsertsMissingVersionBeforeCompatibility(t *testi
 		"      - .agents/skills/ctxpm\n" +
 		"packages: []\n"
 	expected := "" +
-		"version: 1\n" +
+		"version: 1.0\n" +
 		"project:\n" +
 		"  name: sample\n" +
 		"dependencies:\n" +
@@ -231,7 +261,7 @@ func TestUpdateResourceVersionsInsertsMissingVersionBeforeCompatibility(t *testi
 func TestAddDependencyReordersOnlyDependencySection(t *testing.T) {
 	root := t.TempDir()
 	original := "" +
-		"version: 1\n" +
+		"version: 1.0\n" +
 		"project:\n" +
 		"  name: sample\n" +
 		"dependencies:\n" +
@@ -250,7 +280,7 @@ func TestAddDependencyReordersOnlyDependencySection(t *testing.T) {
 		"    type: skill\n" +
 		"    path: .ctxpm/packages/skills/local\n"
 	expected := "" +
-		"version: 1\n" +
+		"version: 1.0\n" +
 		"project:\n" +
 		"  name: sample\n" +
 		"dependencies:\n" +
@@ -295,7 +325,6 @@ func TestAddDependencyReordersOnlyDependencySection(t *testing.T) {
 	if !changed {
 		t.Fatalf("AddDependency() changed = false, want true")
 	}
-
 	got := readManifest(t, root)
 	if got != expected {
 		t.Fatalf("manifest mismatch\n--- got ---\n%s\n--- want ---\n%s", got, expected)
@@ -305,13 +334,13 @@ func TestAddDependencyReordersOnlyDependencySection(t *testing.T) {
 func TestAddDependencyExpandsInlineEmptySection(t *testing.T) {
 	root := t.TempDir()
 	original := "" +
-		"version: 1\n" +
+		"version: 1.0\n" +
 		"project:\n" +
 		"  name: sample\n" +
 		"dependencies: []\n" +
 		"packages: []\n"
 	expected := "" +
-		"version: 1\n" +
+		"version: 1.0\n" +
 		"project:\n" +
 		"  name: sample\n" +
 		"dependencies:\n" +
@@ -344,7 +373,7 @@ func TestAddDependencyExpandsInlineEmptySection(t *testing.T) {
 func TestRemoveDependencyDeletesOnlyTargetBlock(t *testing.T) {
 	root := t.TempDir()
 	original := "" +
-		"version: 1\n" +
+		"version: 1.0\n" +
 		"project:\n" +
 		"  name: sample\n" +
 		"dependencies:\n" +
@@ -362,7 +391,7 @@ func TestRemoveDependencyDeletesOnlyTargetBlock(t *testing.T) {
 		"    type: skill\n" +
 		"    path: .ctxpm/packages/skills/local\n"
 	expected := "" +
-		"version: 1\n" +
+		"version: 1.0\n" +
 		"project:\n" +
 		"  name: sample\n" +
 		"dependencies:\n" +
@@ -384,7 +413,6 @@ func TestRemoveDependencyDeletesOnlyTargetBlock(t *testing.T) {
 	if !changed {
 		t.Fatalf("RemoveDependency() changed = false, want true")
 	}
-
 	got := readManifest(t, root)
 	if got != expected {
 		t.Fatalf("manifest mismatch\n--- got ---\n%s\n--- want ---\n%s", got, expected)
@@ -394,7 +422,7 @@ func TestRemoveDependencyDeletesOnlyTargetBlock(t *testing.T) {
 func TestRemovePackageCollapsesEmptySection(t *testing.T) {
 	root := t.TempDir()
 	original := "" +
-		"version: 1\n" +
+		"version: 1.0\n" +
 		"project:\n" +
 		"  name: sample\n" +
 		"dependencies: []\n" +
@@ -403,7 +431,7 @@ func TestRemovePackageCollapsesEmptySection(t *testing.T) {
 		"    type: skill\n" +
 		"    path: .ctxpm/packages/skills/local\n"
 	expected := "" +
-		"version: 1\n" +
+		"version: 1.0\n" +
 		"project:\n" +
 		"  name: sample\n" +
 		"dependencies: []\n" +

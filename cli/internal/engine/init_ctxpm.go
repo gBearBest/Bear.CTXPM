@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"time"
 
@@ -30,7 +31,36 @@ func ensureManagedEntrypoint(path, agent string, allowRepair bool) error {
 	if err != nil {
 		return fmt.Errorf("entrypoint %s: %w", path, err)
 	}
+	if updated == string(existing) {
+		return nil
+	}
 	return os.WriteFile(path, []byte(updated), 0o644)
+}
+
+func refreshManagedEntrypoints(root string, m *manifest.Manifest, allowRepair bool) error {
+	if m == nil || len(m.Entrypoints) == 0 {
+		return nil
+	}
+
+	agents := make([]string, 0, len(m.Entrypoints))
+	for agent, entrypoint := range m.Entrypoints {
+		if strings.TrimSpace(entrypoint.Mode) != "managed" {
+			continue
+		}
+		agents = append(agents, agent)
+	}
+	sort.Strings(agents)
+	for _, agent := range agents {
+		entrypoint := m.Entrypoints[agent]
+		entrypointFile := strings.TrimSpace(entrypoint.File)
+		if entrypointFile == "" {
+			entrypointFile = manifest.EntrypointFile(agent)
+		}
+		if err := ensureManagedEntrypoint(filepath.Join(root, entrypointFile), agent, allowRepair); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func updateManagedBlock(existing, block string, allowRepair bool) (string, error) {
