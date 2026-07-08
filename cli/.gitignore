@@ -2,3 +2,7 @@
 /ctxpm
 /bin/*
 !/bin/.gitkeep
+
+# Generated Go files.
+internal/engine/zz_bundled_docs_generated.go
+internal/manifest/zz_managed_entrypoint_generated.go
