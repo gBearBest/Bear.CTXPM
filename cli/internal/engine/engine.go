@@ -28,6 +28,17 @@ func New(root string) *App {
 	return &App{Root: root}
 }
 
+func ensureManifestVersion(root string, allowMissing bool) error {
+	_, err := manifest.SyncVersion(root)
+	if err == nil {
+		return nil
+	}
+	if allowMissing && errors.Is(err, manifest.ErrNotFound) {
+		return nil
+	}
+	return err
+}
+
 type textResult interface {
 	Text() string
 }
@@ -123,6 +134,9 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 		projectName = filepath.Base(a.Root)
 	}
 
+	if err := ensureManifestVersion(a.Root, true); err != nil {
+		return nil, err
+	}
 	m, manifestPath, err := manifest.Load(a.Root)
 	switch {
 	case err == nil:
@@ -135,7 +149,7 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 	opts.Agent = discovery.agent
 	if m == nil {
 		m = &manifest.Manifest{
-			Version:      manifest.ManifestVersion2,
+			Version:      manifest.CurrentManifestVersion,
 			Project:      manifest.Project{Name: projectName},
 			Agents:       []string{opts.Agent},
 			UpdatePolicy: manifest.DefaultPolicy(),
@@ -150,8 +164,8 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 		}
 	}
 
-	if m.Version != manifest.ManifestVersion2 {
-		m.Version = manifest.ManifestVersion2
+	if m.Version != manifest.CurrentManifestVersion {
+		m.Version = manifest.CurrentManifestVersion
 	}
 	if strings.TrimSpace(m.Project.Name) == "" || opts.Force {
 		m.Project.Name = projectName
@@ -303,6 +317,9 @@ func (r AddResult) Text() string {
 }
 
 func (a *App) Add(ctx context.Context, opts AddOptions) (*AddResult, error) {
+	if err := ensureManifestVersion(a.Root, false); err != nil {
+		return nil, err
+	}
 	m, manifestPath, err := manifest.Load(a.Root)
 	if err != nil {
 		return nil, err
@@ -516,6 +533,9 @@ func (r InstallResult) Text() string {
 }
 
 func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult, error) {
+	if err := ensureManifestVersion(a.Root, false); err != nil {
+		return nil, err
+	}
 	m, _, err := manifest.Load(a.Root)
 	if err != nil {
 		return nil, err
@@ -791,6 +811,9 @@ func (r UpdateResult) Text() string {
 }
 
 func (a *App) Update(ctx context.Context, opts UpdateOptions) (*UpdateResult, error) {
+	if err := ensureManifestVersion(a.Root, false); err != nil {
+		return nil, err
+	}
 	m, _, err := manifest.Load(a.Root)
 	if err != nil {
 		return nil, err
@@ -863,8 +886,18 @@ func (a *App) Update(ctx context.Context, opts UpdateOptions) (*UpdateResult, er
 			result.Skipped = append(result.Skipped, UpdateAction{Name: dep.Name, Status: updateInfo.Status, Reason: updateInfo.Reason})
 		}
 	}
+	if !opts.DryRun {
+		if err := refreshManagedEntrypoints(a.Root, m, false); err != nil {
+			return nil, err
+		}
+	}
 	if !opts.DryRun && len(versionUpdates) > 0 {
 		if _, err := manifest.UpdateResourceVersions(a.Root, versionUpdates); err != nil {
+			return nil, err
+		}
+	}
+	if !opts.DryRun {
+		if _, err := a.Install(ctx, InstallOptions{}); err != nil {
 			return nil, err
 		}
 	}
@@ -887,6 +920,9 @@ func (r RemoveResult) Text() string {
 }
 
 func (a *App) Remove(opts RemoveOptions) (*RemoveResult, error) {
+	if err := ensureManifestVersion(a.Root, false); err != nil {
+		return nil, err
+	}
 	m, _, err := manifest.Load(a.Root)
 	if err != nil {
 		return nil, err
@@ -920,6 +956,306 @@ func (a *App) Remove(opts RemoveOptions) (*RemoveResult, error) {
 		return &RemoveResult{Status: ternary(opts.DeleteFiles, "removed_and_deleted", "removed"), Kind: "package", Name: pkg.Name}, nil
 	}
 	return nil, fmt.Errorf("resource %q was not found", opts.Name)
+}
+
+type MigrationCandidate struct {
+	Kind              string   `json:"kind"`
+	Name              string   `json:"name"`
+	Type              string   `json:"type"`
+	OriginalPath      string   `json:"original_path"`
+	CanonicalPath     string   `json:"canonical_path"`
+	Compatibility     []string `json:"compatibility,omitempty"`
+	Evidence          []string `json:"evidence,omitempty"`
+	RequiresMigration bool     `json:"requires_migration"`
+}
+
+type DetectResult struct {
+	Status       string               `json:"status"`
+	ManifestPath string               `json:"manifest_path"`
+	Candidates   []MigrationCandidate `json:"candidates"`
+	Unresolved   []string             `json:"unresolved_resources,omitempty"`
+	Warnings     []string             `json:"warnings,omitempty"`
+}
+
+func (r DetectResult) Text() string {
+	lines := []string{"Detection status: " + r.Status}
+	for _, candidate := range r.Candidates {
+		line := fmt.Sprintf("- %s [%s/%s] original=%s canonical=%s", candidate.Name, candidate.Kind, candidate.Type, candidate.OriginalPath, candidate.CanonicalPath)
+		lines = append(lines, line)
+	}
+	if len(r.Unresolved) > 0 {
+		lines = append(lines, "Unresolved:")
+		for _, item := range r.Unresolved {
+			lines = append(lines, "- "+item)
+		}
+	}
+	if len(r.Warnings) > 0 {
+		lines = append(lines, "Warnings:")
+		for _, item := range r.Warnings {
+			lines = append(lines, "- "+item)
+		}
+	}
+	if r.ManifestPath != "" {
+		lines = append(lines, "Manifest: "+r.ManifestPath)
+	}
+	return strings.Join(lines, "\n") + "\n"
+}
+
+func (a *App) Detect() (*DetectResult, error) {
+	m, manifestPath, err := manifest.Load(a.Root)
+	if err != nil {
+		return nil, err
+	}
+	plan, err := collectMigrationCandidates(a.Root, m, m.Project.Name)
+	if err != nil {
+		return nil, err
+	}
+	result := &DetectResult{
+		Status:       "clean",
+		ManifestPath: manifestPath,
+		Unresolved:   plan.unresolved,
+	}
+	for _, candidate := range plan.candidates {
+		result.Candidates = append(result.Candidates, migrationCandidateToResult(candidate))
+	}
+	if len(result.Candidates) > 0 {
+		result.Status = "migration_candidates_found"
+	}
+	if len(result.Unresolved) > 0 {
+		if result.Status == "clean" {
+			result.Status = "blocked"
+		} else {
+			result.Status = "partial"
+		}
+	}
+	return result, nil
+}
+
+type MigrateOptions struct {
+	Paths  []string
+	All    bool
+	DryRun bool
+}
+
+type MigrationAction struct {
+	Name          string `json:"name"`
+	Kind          string `json:"kind,omitempty"`
+	Status        string `json:"status"`
+	OriginalPath  string `json:"original_path,omitempty"`
+	CanonicalPath string `json:"canonical_path,omitempty"`
+	Reason        string `json:"reason,omitempty"`
+}
+
+type MigrateResult struct {
+	Status       string            `json:"status"`
+	ManifestPath string            `json:"manifest_path,omitempty"`
+	Applied      []MigrationAction `json:"applied"`
+	Skipped      []MigrationAction `json:"skipped,omitempty"`
+	Unresolved   []string          `json:"unresolved_resources,omitempty"`
+	Validation   ValidateResult    `json:"validation"`
+	Warnings     []string          `json:"warnings,omitempty"`
+	Files        []string          `json:"files,omitempty"`
+}
+
+func (r MigrateResult) Text() string {
+	lines := []string{"Migration status: " + r.Status}
+	if r.ManifestPath != "" {
+		lines = append(lines, "Manifest: "+r.ManifestPath)
+	}
+	if len(r.Applied) > 0 {
+		lines = append(lines, "Applied:")
+		for _, item := range r.Applied {
+			line := fmt.Sprintf("- %s [%s] %s", item.Name, item.Status, item.OriginalPath)
+			if item.CanonicalPath != "" {
+				line += " -> " + item.CanonicalPath
+			}
+			lines = append(lines, line)
+		}
+	}
+	if len(r.Skipped) > 0 {
+		lines = append(lines, "Skipped:")
+		for _, item := range r.Skipped {
+			line := fmt.Sprintf("- %s [%s]", item.Name, item.Status)
+			if item.Reason != "" {
+				line += " reason=" + item.Reason
+			}
+			lines = append(lines, line)
+		}
+	}
+	if len(r.Unresolved) > 0 {
+		lines = append(lines, "Unresolved:")
+		for _, item := range r.Unresolved {
+			lines = append(lines, "- "+item)
+		}
+	}
+	if len(r.Warnings) > 0 {
+		lines = append(lines, "Warnings:")
+		for _, item := range r.Warnings {
+			lines = append(lines, "- "+item)
+		}
+	}
+	lines = append(lines, "Validation: "+ternary(r.Validation.OK, "ok", "failed"))
+	for _, issue := range r.Validation.Issues {
+		lines = append(lines, "- "+issue)
+	}
+	if len(r.Files) > 0 {
+		lines = append(lines, "Files touched:")
+		for _, item := range r.Files {
+			lines = append(lines, "- "+item)
+		}
+	}
+	return strings.Join(lines, "\n") + "\n"
+}
+
+func (a *App) Migrate(opts MigrateOptions) (*MigrateResult, error) {
+	m, manifestPath, err := manifest.Load(a.Root)
+	if err != nil {
+		return nil, err
+	}
+	plan, err := collectMigrationCandidates(a.Root, m, m.Project.Name)
+	if err != nil {
+		return nil, err
+	}
+	selected, err := selectMigrationCandidates(plan.candidates, opts.Paths, opts.All)
+	if err != nil {
+		return nil, err
+	}
+	result := &MigrateResult{
+		Status:       ternary(opts.DryRun, "dry_run", "applied"),
+		ManifestPath: manifestPath,
+		Unresolved:   dedupe(plan.unresolved),
+	}
+	if len(selected) == 0 {
+		return nil, errors.New("no migration candidates were selected")
+	}
+
+	migratedResources := []manifest.Resource{}
+	files := []string{manifestPath}
+	for _, candidate := range selected {
+		action := MigrationAction{
+			Name:          candidate.resource.Name,
+			Kind:          candidate.kind,
+			OriginalPath:  candidate.original,
+			CanonicalPath: candidate.resource.Path,
+		}
+		if m.HasResource(candidate.resource.Name) {
+			action.Status = "blocked"
+			action.Reason = "resource name already exists in ctxpm.yaml"
+			result.Skipped = append(result.Skipped, action)
+			continue
+		}
+		if opts.DryRun {
+			action.Status = "would_migrate"
+			result.Applied = append(result.Applied, action)
+			continue
+		}
+		if err := moveResourceToCanonical(a.Root, candidate.original, candidate.resource.Path); err != nil {
+			action.Status = "blocked"
+			action.Reason = err.Error()
+			result.Skipped = append(result.Skipped, action)
+			continue
+		}
+		if err := ensureCompatibility(a.Root, candidate.resource); err != nil {
+			return nil, err
+		}
+		switch candidate.kind {
+		case "dependency":
+			m.Dependencies = append(m.Dependencies, candidate.resource)
+		default:
+			m.Packages = append(m.Packages, candidate.resource)
+		}
+		migratedResources = append(migratedResources, candidate.resource)
+		files = append(files, filepath.Join(a.Root, filepath.FromSlash(candidate.resource.Path)))
+		for _, compat := range candidate.resource.Compatibility {
+			files = append(files, filepath.Join(a.Root, filepath.FromSlash(compat)))
+		}
+		action.Status = "migrated"
+		result.Applied = append(result.Applied, action)
+	}
+	if !opts.DryRun {
+		sortResources(m.Dependencies)
+		sortResources(m.Packages)
+		if _, err := manifest.Save(a.Root, m); err != nil {
+			return nil, err
+		}
+		gitignoreRules := dedupe(append(
+			[]string{".ctxpm/dependencies/", ".ctxpm/state/"},
+			compatibilityGitignoreRules(migratedResources)...,
+		))
+		if _, err := ensureGitignoreRules(filepath.Join(a.Root, ".gitignore"), gitignoreRules); err != nil {
+			return nil, err
+		}
+	}
+	validation, err := a.Validate()
+	if err != nil {
+		return nil, err
+	}
+	result.Validation = *validation
+	result.Files = dedupe(files)
+	if !opts.DryRun {
+		switch {
+		case len(result.Applied) == 0 && len(result.Skipped) > 0:
+			result.Status = "blocked"
+		case len(result.Skipped) > 0:
+			result.Status = "partial"
+		}
+	}
+	return result, nil
+}
+
+func migrationCandidateToResult(candidate discoveredResource) MigrationCandidate {
+	return MigrationCandidate{
+		Kind:              candidate.kind,
+		Name:              candidate.resource.Name,
+		Type:              candidate.resource.Type,
+		OriginalPath:      candidate.original,
+		CanonicalPath:     candidate.resource.Path,
+		Compatibility:     append([]string(nil), candidate.resource.Compatibility...),
+		Evidence:          append([]string(nil), candidate.evidence...),
+		RequiresMigration: candidate.requiresMigration,
+	}
+}
+
+func selectMigrationCandidates(candidates []discoveredResource, selectors []string, all bool) ([]discoveredResource, error) {
+	if all {
+		return append([]discoveredResource(nil), candidates...), nil
+	}
+	selectors = filterEmptyStrings(selectors)
+	if len(selectors) == 0 {
+		return nil, nil
+	}
+	selected := []discoveredResource{}
+	used := map[int]bool{}
+	for _, selector := range selectors {
+		matches := []int{}
+		for i, candidate := range candidates {
+			if migrationCandidateMatches(candidate, selector) {
+				matches = append(matches, i)
+			}
+		}
+		if len(matches) == 0 {
+			return nil, fmt.Errorf("migration candidate %q was not found", selector)
+		}
+		if len(matches) > 1 {
+			return nil, fmt.Errorf("migration candidate %q is ambiguous; use the original path", selector)
+		}
+		if used[matches[0]] {
+			continue
+		}
+		used[matches[0]] = true
+		selected = append(selected, candidates[matches[0]])
+	}
+	return selected, nil
+}
+
+func migrationCandidateMatches(candidate discoveredResource, selector string) bool {
+	normalizedSelector := filepath.ToSlash(strings.TrimSpace(selector))
+	if normalizedSelector == "" {
+		return false
+	}
+	return normalizedSelector == candidate.original ||
+		normalizedSelector == candidate.resource.Path ||
+		selector == candidate.resource.Name
 }
 
 type installOutcome struct {

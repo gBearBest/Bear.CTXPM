@@ -7,8 +7,6 @@
 !/docs/assets/
 !/docs/assets/social-preview*.svg
 
-cli/internal/engine/zz_bundled_docs_generated.go
-
 .ctxpm/dependencies/
 .ctxpm/state/
 .agents/skills/

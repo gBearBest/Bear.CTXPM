@@ -25,7 +25,7 @@ func TestInstallRepairsPackageCompatibility(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	writeManifestForTest(t, root, &manifest.Manifest{
-		Version: 1,
+		Version: manifest.CurrentManifestVersion,
 		Project: manifest.Project{Name: "sample"},
 		Agents:  []string{"generic"},
 		Packages: []manifest.Resource{
@@ -71,7 +71,7 @@ func TestInstallRepairsDependencyCompatibilityWithoutSource(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	writeManifestForTest(t, root, &manifest.Manifest{
-		Version: 2,
+		Version: manifest.CurrentManifestVersion,
 		Project: manifest.Project{Name: "sample"},
 		Agents:  []string{"generic"},
 		Dependencies: []manifest.Resource{
@@ -118,7 +118,7 @@ func TestInstallUpdatesGitignoreForCompatibilityDirectories(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	writeManifestForTest(t, root, &manifest.Manifest{
-		Version: 2,
+		Version: manifest.CurrentManifestVersion,
 		Project: manifest.Project{Name: "sample"},
 		Agents:  []string{"generic"},
 		Packages: []manifest.Resource{
@@ -156,7 +156,7 @@ func TestInstallIndexesCanonicalPackageFromCtxpmDirectory(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	writeManifestForTest(t, root, &manifest.Manifest{
-		Version:      2,
+		Version:      manifest.CurrentManifestVersion,
 		Project:      manifest.Project{Name: "sample"},
 		Agents:       []string{"generic"},
 		Dependencies: []manifest.Resource{},
@@ -215,7 +215,7 @@ func TestInstallIndexesCanonicalDependencyFromCtxpmDirectory(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	writeManifestForTest(t, root, &manifest.Manifest{
-		Version:      2,
+		Version:      manifest.CurrentManifestVersion,
 		Project:      manifest.Project{Name: "sample"},
 		Agents:       []string{"generic"},
 		Dependencies: []manifest.Resource{},
@@ -281,8 +281,8 @@ func TestInitCreatesV2Manifest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("manifest.Load() error = %v", err)
 	}
-	if loaded.Version != manifest.ManifestVersion2 {
-		t.Fatalf("manifest version = %d", loaded.Version)
+	if loaded.Version != manifest.CurrentManifestVersion {
+		t.Fatalf("manifest version = %s", loaded.Version)
 	}
 	if len(loaded.Dependencies) != 1 {
 		t.Fatalf("dependencies = %d, want 1", len(loaded.Dependencies))
@@ -331,7 +331,7 @@ func TestInitUpdatesGitignoreForExistingCompatibilityPaths(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	writeManifestForTest(t, root, &manifest.Manifest{
-		Version: 2,
+		Version: manifest.CurrentManifestVersion,
 		Project: manifest.Project{Name: "sample"},
 		Agents:  []string{"generic"},
 		Packages: []manifest.Resource{
@@ -458,7 +458,7 @@ func TestInitForceRepairsDamagedManagedBlock(t *testing.T) {
 func TestInitRepairsExistingManifestWithoutForce(t *testing.T) {
 	root := t.TempDir()
 	writeManifestForTest(t, root, &manifest.Manifest{
-		Version:      1,
+		Version:      manifest.CurrentManifestVersion,
 		Project:      manifest.Project{Name: "sample"},
 		Agents:       []string{"generic"},
 		Dependencies: []manifest.Resource{},
@@ -477,8 +477,8 @@ func TestInitRepairsExistingManifestWithoutForce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("manifest.Load() error = %v", err)
 	}
-	if loaded.Version != manifest.ManifestVersion2 {
-		t.Fatalf("manifest version = %d", loaded.Version)
+	if loaded.Version != manifest.CurrentManifestVersion {
+		t.Fatalf("manifest version = %s", loaded.Version)
 	}
 	if loaded.Project.Name != "sample" {
 		t.Fatalf("project.name = %q", loaded.Project.Name)
@@ -691,7 +691,7 @@ func TestValidateReportsMissingPackageCompatibility(t *testing.T) {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
 	writeManifestForTest(t, root, &manifest.Manifest{
-		Version: 1,
+		Version:      manifest.CurrentManifestVersion,
 		Project: manifest.Project{Name: "sample"},
 		Agents:  []string{"generic"},
 		Packages: []manifest.Resource{
@@ -714,6 +714,103 @@ func TestValidateReportsMissingPackageCompatibility(t *testing.T) {
 	}
 	if !containsIssue(result.Issues, `compatibility path ".agents/skills/ctxpm-release" is missing`) {
 		t.Fatalf("Validate() issues = %v", result.Issues)
+	}
+}
+
+func TestDetectFindsUnmanagedCompatibilityResource(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".agents", "skills", "reviewer"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".agents", "skills", "reviewer", "SKILL.md"), []byte("review carefully\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version:      manifest.CurrentManifestVersion,
+		Project:      manifest.Project{Name: "sample"},
+		Agents:       []string{"generic"},
+		Dependencies: []manifest.Resource{},
+		Packages:     []manifest.Resource{},
+	})
+
+	app := New(root)
+	result, err := app.Detect()
+	if err != nil {
+		t.Fatalf("Detect() error = %v", err)
+	}
+	if result.Status != "migration_candidates_found" {
+		t.Fatalf("Detect() status = %q", result.Status)
+	}
+	if len(result.Candidates) != 1 {
+		t.Fatalf("Detect() candidates = %+v", result.Candidates)
+	}
+	candidate := result.Candidates[0]
+	if candidate.OriginalPath != ".agents/skills/reviewer" {
+		t.Fatalf("candidate original = %q", candidate.OriginalPath)
+	}
+	if candidate.CanonicalPath != ".ctxpm/packages/skills/reviewer" {
+		t.Fatalf("candidate canonical = %q", candidate.CanonicalPath)
+	}
+}
+
+func TestMigrateMovesCompatibilityResourceAndValidates(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".agents", "skills", "reviewer"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".agents", "skills", "reviewer", "SKILL.md"), []byte("review carefully\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version:      manifest.CurrentManifestVersion,
+		Project:      manifest.Project{Name: "sample"},
+		Agents:       []string{"generic"},
+		Dependencies: []manifest.Resource{},
+		Packages:     []manifest.Resource{},
+	})
+
+	app := New(root)
+	result, err := app.Migrate(MigrateOptions{Paths: []string{".agents/skills/reviewer"}})
+	if err != nil {
+		t.Fatalf("Migrate() error = %v", err)
+	}
+	if result.Status != "applied" {
+		t.Fatalf("Migrate() status = %q", result.Status)
+	}
+	if !result.Validation.OK {
+		t.Fatalf("Migrate() validation = %+v", result.Validation)
+	}
+
+	loaded, _, err := manifest.Load(root)
+	if err != nil {
+		t.Fatalf("manifest.Load() error = %v", err)
+	}
+	found := false
+	for _, pkg := range loaded.Packages {
+		if pkg.Name != "reviewer" {
+			continue
+		}
+		found = true
+		if pkg.Path != ".ctxpm/packages/skills/reviewer" {
+			t.Fatalf("package path = %q", pkg.Path)
+		}
+		if !hasString(pkg.Compatibility, ".agents/skills/reviewer") {
+			t.Fatalf("package compatibility = %v", pkg.Compatibility)
+		}
+		break
+	}
+	if !found {
+		t.Fatalf("packages = %+v", loaded.Packages)
+	}
+	target, err := os.Readlink(filepath.Join(root, ".agents", "skills", "reviewer"))
+	if err != nil {
+		t.Fatalf("Readlink() error = %v", err)
+	}
+	if target != "../../.ctxpm/packages/skills/reviewer" {
+		t.Fatalf("compat symlink = %q", target)
+	}
+	if got := readFileForTest(t, filepath.Join(root, ".ctxpm/packages/skills/reviewer", "SKILL.md")); got != "review carefully\n" {
+		t.Fatalf("migrated content mismatch: %q", got)
 	}
 }
 
@@ -776,7 +873,7 @@ func TestInstallCopiesMultiFileURLDependencyAndUpdatesVersion(t *testing.T) {
 	defer server.Close()
 
 	writeManifestForTest(t, root, &manifest.Manifest{
-		Version: 2,
+		Version: manifest.CurrentManifestVersion,
 		Project: manifest.Project{Name: "sample"},
 		Agents:  []string{"generic"},
 		Dependencies: []manifest.Resource{
@@ -858,7 +955,7 @@ func TestInstallArchiveDependency(t *testing.T) {
 	defer server.Close()
 
 	writeManifestForTest(t, root, &manifest.Manifest{
-		Version: 2,
+		Version: manifest.CurrentManifestVersion,
 		Project: manifest.Project{Name: "sample"},
 		Agents:  []string{"generic"},
 		Dependencies: []manifest.Resource{
@@ -897,6 +994,275 @@ func TestInstallArchiveDependency(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, ".ctxpm/dependencies/skills/analyzer/rules/check.md")); err != nil {
 		t.Fatalf("missing installed archive companion file: %v", err)
 	}
+}
+
+func TestUpdateRefreshesManagedEntrypointBlocks(t *testing.T) {
+	root := t.TempDir()
+	server := newSingleFileUpdateServer(t, "/reviewer.md", "# reviewer\n")
+	defer server.Close()
+
+	entrypoint := filepath.Join(root, "AGENTS.md")
+	original := "Intro\n\n<!-- ctxpm:begin agent=generic -->\nold instructions\n<!-- ctxpm:end -->\n\nFooter\n"
+	if err := os.WriteFile(entrypoint, []byte(original), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version: manifest.CurrentManifestVersion,
+		Project: manifest.Project{Name: "sample"},
+		Agents:  []string{"generic"},
+		Dependencies: []manifest.Resource{
+			{
+				Name:   "reviewer",
+				Type:   "rule",
+				Layout: manifest.LayoutFile,
+				Path:   ".ctxpm/dependencies/rules/reviewer.md",
+				Entry:  "reviewer.md",
+				Source: &manifest.Source{
+					Type:  "url",
+					URL:   server.URL + "/reviewer.md",
+					Entry: "reviewer.md",
+				},
+				Version:       "sha256:stale",
+				Compatibility: []string{".agents/rules/reviewer.md"},
+			},
+		},
+		Packages: []manifest.Resource{},
+		Entrypoints: map[string]manifest.Entrypoint{
+			"generic": {File: "AGENTS.md", Mode: "managed"},
+		},
+	})
+
+	app := New(root)
+	result, err := app.Update(context.Background(), UpdateOptions{Names: []string{"reviewer"}})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if result.Status != "applied" {
+		t.Fatalf("Update() status = %q", result.Status)
+	}
+
+	got := readFileForTest(t, entrypoint)
+	want := "Intro\n\n" + manifest.ManagedEntrypoint("generic") + "\n\nFooter\n"
+	if got != want {
+		t.Fatalf("entrypoint mismatch\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+	loaded, _, err := manifest.Load(root)
+	if err != nil {
+		t.Fatalf("manifest.Load() error = %v", err)
+	}
+	if loaded.Dependencies[0].Version == "sha256:stale" {
+		t.Fatalf("dependency version was not updated")
+	}
+}
+
+func TestUpdateRefreshesAllManagedEntrypoints(t *testing.T) {
+	root := t.TempDir()
+	server := newSingleFileUpdateServer(t, "/reviewer.md", "# reviewer\n")
+	defer server.Close()
+
+	for _, item := range []struct {
+		file  string
+		agent string
+		body  string
+	}{
+		{file: "AGENTS.md", agent: "generic", body: "generic instructions"},
+		{file: "CLAUDE.md", agent: "claude-code", body: "claude instructions"},
+	} {
+		path := filepath.Join(root, item.file)
+		original := "Intro\n\n<!-- ctxpm:begin agent=" + item.agent + " -->\n" + item.body + "\n<!-- ctxpm:end -->\n\nFooter\n"
+		if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+			t.Fatalf("WriteFile(%s) error = %v", item.file, err)
+		}
+	}
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version: manifest.CurrentManifestVersion,
+		Project: manifest.Project{Name: "sample"},
+		Agents:  []string{"generic", "claude-code"},
+		Dependencies: []manifest.Resource{
+			{
+				Name:   "reviewer",
+				Type:   "rule",
+				Layout: manifest.LayoutFile,
+				Path:   ".ctxpm/dependencies/rules/reviewer.md",
+				Entry:  "reviewer.md",
+				Source: &manifest.Source{
+					Type:  "url",
+					URL:   server.URL + "/reviewer.md",
+					Entry: "reviewer.md",
+				},
+				Version:       "sha256:stale",
+				Compatibility: []string{".agents/rules/reviewer.md"},
+			},
+		},
+		Packages: []manifest.Resource{},
+		Entrypoints: map[string]manifest.Entrypoint{
+			"generic":     {File: "AGENTS.md", Mode: "managed"},
+			"claude-code": {File: "CLAUDE.md", Mode: "managed"},
+		},
+	})
+
+	app := New(root)
+	if _, err := app.Update(context.Background(), UpdateOptions{Names: []string{"reviewer"}}); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	for _, item := range []struct {
+		file  string
+		agent string
+	}{
+		{file: "AGENTS.md", agent: "generic"},
+		{file: "CLAUDE.md", agent: "claude-code"},
+	} {
+		got := readFileForTest(t, filepath.Join(root, item.file))
+		want := "Intro\n\n" + manifest.ManagedEntrypoint(item.agent) + "\n\nFooter\n"
+		if got != want {
+			t.Fatalf("%s mismatch\n--- got ---\n%s\n--- want ---\n%s", item.file, got, want)
+		}
+	}
+}
+
+func TestUpdateRunsInstallAfterManifestRefresh(t *testing.T) {
+	root := t.TempDir()
+	server := newSingleFileUpdateServer(t, "/reviewer.md", "# reviewer\n")
+	defer server.Close()
+
+	packagePath := ".ctxpm/packages/rules/project-review.md"
+	if err := os.MkdirAll(filepath.Join(root, ".ctxpm/packages/rules"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(packagePath)), []byte("project review\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	app := New(root)
+	latest, err := app.resolveLatestVersion(context.Background(), manifest.Resource{
+		Name:   "reviewer",
+		Type:   "rule",
+		Layout: manifest.LayoutFile,
+		Path:   ".ctxpm/dependencies/rules/reviewer.md",
+		Entry:  "reviewer.md",
+		Source: &manifest.Source{
+			Type:  "url",
+			URL:   server.URL + "/reviewer.md",
+			Entry: "reviewer.md",
+		},
+	})
+	if err != nil {
+		t.Fatalf("resolveLatestVersion() error = %v", err)
+	}
+
+	entrypoint := filepath.Join(root, "AGENTS.md")
+	original := "Intro\n\n<!-- ctxpm:begin agent=generic -->\nold instructions\n<!-- ctxpm:end -->\n\nFooter\n"
+	if err := os.WriteFile(entrypoint, []byte(original), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version: manifest.CurrentManifestVersion,
+		Project: manifest.Project{Name: "sample"},
+		Agents:  []string{"generic"},
+		Dependencies: []manifest.Resource{
+			{
+				Name:   "reviewer",
+				Type:   "rule",
+				Layout: manifest.LayoutFile,
+				Path:   ".ctxpm/dependencies/rules/reviewer.md",
+				Entry:  "reviewer.md",
+				Source: &manifest.Source{
+					Type:  "url",
+					URL:   server.URL + "/reviewer.md",
+					Entry: "reviewer.md",
+				},
+				Version:       latest,
+				Compatibility: []string{".agents/rules/reviewer.md"},
+			},
+		},
+		Packages: []manifest.Resource{
+			{
+				Name:          "project-review",
+				Type:          "rule",
+				Layout:        manifest.LayoutFile,
+				Path:          packagePath,
+				Entry:         "project-review.md",
+				Compatibility: []string{".agents/rules/project-review.md"},
+			},
+		},
+		Entrypoints: map[string]manifest.Entrypoint{
+			"generic": {File: "AGENTS.md", Mode: "managed"},
+		},
+	})
+
+	if _, err := app.Update(context.Background(), UpdateOptions{Names: []string{"reviewer"}}); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	if got := readFileForTest(t, entrypoint); got != "Intro\n\n"+manifest.ManagedEntrypoint("generic")+"\n\nFooter\n" {
+		t.Fatalf("entrypoint mismatch\n--- got ---\n%s", got)
+	}
+	if target, err := os.Readlink(filepath.Join(root, ".agents", "rules", "project-review.md")); err != nil {
+		t.Fatalf("Readlink() error = %v", err)
+	} else if target != "../../.ctxpm/packages/rules/project-review.md" {
+		t.Fatalf("compat symlink = %q", target)
+	}
+}
+
+func TestUpdateReportsDamagedManagedBlock(t *testing.T) {
+	root := t.TempDir()
+	server := newSingleFileUpdateServer(t, "/reviewer.md", "# reviewer\n")
+	defer server.Close()
+
+	entrypoint := filepath.Join(root, "AGENTS.md")
+	original := "Intro\n\n<!-- ctxpm:begin agent=generic -->\nold instructions\n"
+	if err := os.WriteFile(entrypoint, []byte(original), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version: manifest.CurrentManifestVersion,
+		Project: manifest.Project{Name: "sample"},
+		Agents:  []string{"generic"},
+		Dependencies: []manifest.Resource{
+			{
+				Name:   "reviewer",
+				Type:   "rule",
+				Layout: manifest.LayoutFile,
+				Path:   ".ctxpm/dependencies/rules/reviewer.md",
+				Entry:  "reviewer.md",
+				Source: &manifest.Source{
+					Type:  "url",
+					URL:   server.URL + "/reviewer.md",
+					Entry: "reviewer.md",
+				},
+				Version:       "sha256:stale",
+				Compatibility: []string{".agents/rules/reviewer.md"},
+			},
+		},
+		Packages: []manifest.Resource{},
+		Entrypoints: map[string]manifest.Entrypoint{
+			"generic": {File: "AGENTS.md", Mode: "managed"},
+		},
+	})
+
+	app := New(root)
+	_, err := app.Update(context.Background(), UpdateOptions{Names: []string{"reviewer"}})
+	if err == nil {
+		t.Fatal("Update() error = nil, want damaged block error")
+	}
+	if !strings.Contains(err.Error(), "managed ctxpm block is damaged") {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if got := readFileForTest(t, entrypoint); got != original {
+		t.Fatalf("damaged entrypoint should remain unchanged\n--- got ---\n%s\n--- want ---\n%s", got, original)
+	}
+}
+
+func newSingleFileUpdateServer(t *testing.T, path, content string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != path {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(content))
+	}))
 }
 
 func writeManifestForTest(t *testing.T, root string, m *manifest.Manifest) {

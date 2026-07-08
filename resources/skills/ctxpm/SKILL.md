@@ -39,7 +39,7 @@ Apply the same compatibility rule to other managed resources: keep the canonical
 
 Record `ctxpm` as an external `dependency` of type `skill`.
 
-Recommended v2 entry:
+Recommended 1.0 entry:
 
 ```yaml
 dependencies:
@@ -80,6 +80,8 @@ For multi-file URL or archive resources, compute the version from the full direc
 When the companion CLI is available, prefer it for routine lifecycle operations:
 
 - `ctxpm install`
+- `ctxpm detect`
+- `ctxpm migrate`
 - `ctxpm add`
 - `ctxpm list`
 - `ctxpm validate`
@@ -87,16 +89,18 @@ When the companion CLI is available, prefer it for routine lifecycle operations:
 - `ctxpm update`
 - `ctxpm remove`
 
+Run `ctxpm detect` on a shorter cadence than `ctxpm check-updates` so newly added AI resources in non-ctxpm locations are caught early, then migrate them and validate the result after user confirmation.
+
 If the CLI is unavailable, follow the same protocol manually instead of inventing a partial workflow.
 
 ## Compact `ctxpm.yaml` Reference
 
 The complete schema is defined in [`ctxpm-yaml.md`](ctxpm-yaml.md). `SKILL.md` should tell agents to read that sibling file before editing `ctxpm.yaml`.
 
-Compact v2 example:
+Compact 1.0 example:
 
 ```yaml
-version: 2
+version: 1.0
 
 project:
   name: your-project-name

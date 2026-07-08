@@ -7,7 +7,7 @@ AI agents must read this format before creating, editing, auditing, or deleting 
 ## Top-Level Structure
 
 ```yaml
-version: 2
+version: 1.0
 
 project:
   name: your-project-name
@@ -34,7 +34,7 @@ entrypoints:
 
 | Field | Required | Description |
 | --- | --- | --- |
-| `version` | Yes | Format version. Use `2`. |
+| `version` | Yes | Format version. Use `1.0`. |
 | `project.name` | Yes | Project name. |
 | `agents` | Yes | Confirmed agent profiles used by the project. |
 | `update_policy` | No | Policy for dependency update checks. |
