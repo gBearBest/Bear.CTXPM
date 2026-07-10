@@ -25,6 +25,26 @@ func TestValidateCurrentVersionMultiFileURLResource(t *testing.T) {
 	}
 }
 
+func TestValidateMemoryDirectoryDefaultsToMemoryEntry(t *testing.T) {
+	resource := Resource{
+		Name: "project-memory",
+		Type: "memory",
+		Path: ".ctxpm/packages/memories/project-memory",
+	}
+	if err := resource.validate("package"); err != nil {
+		t.Fatalf("validate() error = %v", err)
+	}
+	if got := resource.EffectiveEntry(); got != "MEMORY.md" {
+		t.Fatalf("EffectiveEntry() = %q, want MEMORY.md", got)
+	}
+}
+
+func TestTypeDirReturnsMemoriesForMemoryResources(t *testing.T) {
+	if got := TypeDir("memory"); got != "memories" {
+		t.Fatalf("TypeDir(memory) = %q, want memories", got)
+	}
+}
+
 func TestValidateCurrentVersionRejectsSingleFileURLDirectoryLayout(t *testing.T) {
 	resource := Resource{
 		Name:   "reviewer",

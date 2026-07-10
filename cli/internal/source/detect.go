@@ -147,6 +147,9 @@ func buildURLDetection(input DetectionInput, rawURL string) (*DetectionResult, e
 		if entry == "" && input.ResourceType == "skill" {
 			entry = "SKILL.md"
 		}
+		if entry == "" && input.ResourceType == "memory" {
+			entry = "MEMORY.md"
+		}
 		if entry == "" {
 			return nil, errors.New("multi-file URL resources require --entry")
 		}
@@ -278,6 +281,9 @@ func inferGitOrArchiveShape(input DetectionInput, rawSourcePath string) (resourc
 	case manifest.LayoutDir:
 		if entry == "" && input.ResourceType == "skill" {
 			entry = "SKILL.md"
+		}
+		if entry == "" && input.ResourceType == "memory" {
+			entry = "MEMORY.md"
 		}
 		if entry == "" {
 			return resourceShape{}, fmt.Errorf("%s directory resources require --entry", input.ResourceType)

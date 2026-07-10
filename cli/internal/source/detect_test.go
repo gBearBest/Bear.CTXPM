@@ -119,3 +119,20 @@ func TestDetectArchiveURL(t *testing.T) {
 		t.Fatalf("entry = %q", result.Resource.Entry)
 	}
 }
+
+func TestDetectMemoryMultiFileURLDefaultsToMemoryEntry(t *testing.T) {
+	result, err := Detect(context.Background(), DetectionInput{
+		RawURL:       "https://example.com/memories/project-history/",
+		ResourceType: "memory",
+		Files:        []string{"MEMORY.md", "entries/decisions.md"},
+	})
+	if err != nil {
+		t.Fatalf("Detect() error = %v", err)
+	}
+	if result.Resource.Entry != "MEMORY.md" {
+		t.Fatalf("entry = %q", result.Resource.Entry)
+	}
+	if result.Canonical != ".ctxpm/dependencies/memories/project-history" {
+		t.Fatalf("canonical = %q", result.Canonical)
+	}
+}

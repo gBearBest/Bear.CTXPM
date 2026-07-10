@@ -221,11 +221,12 @@ func (p *initResourcePlan) recordCandidate(candidate discoveredResource, migrate
 func discoverInitResources(root string, projectHints []string) ([]discoveredResource, error) {
 	candidates := []discoveredResource{}
 	for relDir, resourceType := range map[string]string{
-		"skills":  "skill",
-		"rules":   "rule",
-		"specs":   "spec",
-		"prompts": "prompt",
-		"mcp":     "mcp",
+		"skills":   "skill",
+		"rules":    "rule",
+		"specs":    "spec",
+		"prompts":  "prompt",
+		"mcp":      "mcp",
+		"memories": "memory",
 	} {
 		discovered, err := discoverTypedResourceDir(root, relDir, resourceType, true, projectHints, true, false)
 		if err != nil {
@@ -234,11 +235,12 @@ func discoverInitResources(root string, projectHints []string) ([]discoveredReso
 		candidates = append(candidates, discovered...)
 	}
 	for relDir, resourceType := range map[string]string{
-		"ai/skills":  "skill",
-		"ai/rules":   "rule",
-		"ai/specs":   "spec",
-		"ai/prompts": "prompt",
-		"ai/mcp":     "mcp",
+		"ai/skills":   "skill",
+		"ai/rules":    "rule",
+		"ai/specs":    "spec",
+		"ai/prompts":  "prompt",
+		"ai/mcp":      "mcp",
+		"ai/memories": "memory",
 	} {
 		discovered, err := discoverTypedResourceDir(root, relDir, resourceType, true, projectHints, true, false)
 		if err != nil {
@@ -263,7 +265,7 @@ func discoverInitResources(root string, projectHints []string) ([]discoveredReso
 func discoverCompatibilityResources(root string, projectHints []string) ([]discoveredResource, error) {
 	candidates := []discoveredResource{}
 	for _, relDir := range []string{".agents", ".claude", ".antigravity"} {
-		for _, resourceType := range []string{"skill", "rule", "spec", "prompt", "mcp"} {
+		for _, resourceType := range manifest.SupportedTypes() {
 			discovered, err := discoverTypedResourceDir(root, filepath.ToSlash(filepath.Join(relDir, manifest.TypeDir(resourceType))), resourceType, true, projectHints, true, true)
 			if err != nil {
 				return nil, err
@@ -346,7 +348,7 @@ func discoverCanonicalResources(root string) ([]discoveredResource, error) {
 		{kind: "package", root: ".ctxpm/packages"},
 		{kind: "dependency", root: ".ctxpm/dependencies"},
 	} {
-		for _, resourceType := range []string{"skill", "rule", "spec", "prompt", "mcp"} {
+		for _, resourceType := range manifest.SupportedTypes() {
 			relDir := filepath.ToSlash(filepath.Join(candidate.root, manifest.TypeDir(resourceType)))
 			discovered, err := discoverCanonicalResourceDir(root, relDir, resourceType, candidate.kind)
 			if err != nil {
@@ -484,6 +486,8 @@ func detectDirectoryEntry(root, resourceType string) (string, error) {
 		defaults = append(defaults, "SPEC.md")
 	case "prompt":
 		defaults = append(defaults, "PROMPT.md")
+	case "memory":
+		defaults = append(defaults, "MEMORY.md")
 	}
 	defaults = append(defaults, "README.md", "index.md")
 	for _, candidate := range defaults {
@@ -625,6 +629,8 @@ func docsResourceType(name string) string {
 		return "prompt"
 	case strings.Contains(lower, "mcp"):
 		return "mcp"
+	case strings.Contains(lower, "memory"):
+		return "memory"
 	default:
 		return ""
 	}

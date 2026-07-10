@@ -128,7 +128,7 @@ This means:
 - When adding resources, AI should not scatter them into arbitrary directories without registration.
 - After adding resources, AI should update `ctxpm.yaml`, entrypoint documents, and the corresponding resource directories.
 
-If a user or AI later wants to introduce a new skill, rule, spec, prompt, or MCP resource, first decide whether it is a `package` or a `dependency`, then place it under `.ctxpm/packages/` or `.ctxpm/dependencies/`.
+If a user or AI later wants to introduce a new skill, rule, spec, prompt, memory, or MCP resource, first decide whether it is a `package` or a `dependency`, then place it under `.ctxpm/packages/` or `.ctxpm/dependencies/`.
 
 ### 3.7 External Dependency Versions Use Source Hashes
 
@@ -139,7 +139,7 @@ When installing or updating an external `dependency`, record a stable hash-based
 - Do not also duplicate that same Git commit SHA under `source.commit`; `version` is the authoritative installed revision.
 - If the resource root is a non-Git single file, compute `version: sha256:<hex>`.
 - If the resource root is a non-Git directory, compute `version: sha256tree:<hex>` from the full directory tree.
-- The entry file is the file the AI agent should read first inside the resource root, such as `SKILL.md`, a rule file, a prompt file, a spec entry file, or an MCP configuration file.
+- The entry file is the file the AI agent should read first inside the resource root, such as `SKILL.md`, `MEMORY.md`, a rule file, a prompt file, a spec entry file, or an MCP configuration file.
 - If a multi-file URL resource is used, explicitly list all member files and record the root as `layout: dir`.
 - Do not use branch names, tags, `latest`, filenames, timestamps, or vague release labels as the version value for external AI resources.
 - If the source hash cannot be confirmed, mark the version as unresolved in the installation report instead of inventing a value.
@@ -161,12 +161,14 @@ project/
       rules/
       specs/
       prompts/
+      memories/
       mcp/
     packages/
       skills/
       rules/
       specs/
       prompts/
+      memories/
       mcp/
   AGENTS.md / CLAUDE.md / ANTIGRAVITY.md / other root entrypoint files
 ```
@@ -257,6 +259,7 @@ Then scan all possible AI resources in the project, including but not limited to
 - `rules/`
 - `specs/`
 - `prompts/`
+- `memories/`
 - `mcp/`
 - `ai/`
 - Documents in `docs/` related to AI usage rules
@@ -338,11 +341,13 @@ If they do not already exist, create:
 - `.ctxpm/dependencies/rules/`
 - `.ctxpm/dependencies/specs/`
 - `.ctxpm/dependencies/prompts/`
+- `.ctxpm/dependencies/memories/`
 - `.ctxpm/dependencies/mcp/`
 - `.ctxpm/packages/skills/`
 - `.ctxpm/packages/rules/`
 - `.ctxpm/packages/specs/`
 - `.ctxpm/packages/prompts/`
+- `.ctxpm/packages/memories/`
 - `.ctxpm/packages/mcp/`
 
 ### 5.6 Migrate Existing Resources
@@ -607,6 +612,7 @@ Use the following directory mapping:
 | `rule` | `.ctxpm/packages/rules/` or `.ctxpm/dependencies/rules/` |
 | `spec` | `.ctxpm/packages/specs/` or `.ctxpm/dependencies/specs/` |
 | `prompt` | `.ctxpm/packages/prompts/` or `.ctxpm/dependencies/prompts/` |
+| `memory` | `.ctxpm/packages/memories/` or `.ctxpm/dependencies/memories/` |
 | `mcp` | `.ctxpm/packages/mcp/` or `.ctxpm/dependencies/mcp/` |
 
 When placing a resource, always determine:

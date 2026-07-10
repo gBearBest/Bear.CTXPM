@@ -68,6 +68,7 @@ The **entry file** is the file an AI agent should read first inside the resource
 - `rule`
 - `spec`
 - `prompt`
+- `memory`
 - `mcp`
 
 Use these directory mappings:
@@ -78,6 +79,7 @@ Use these directory mappings:
 | `rule` | `.ctxpm/packages/rules/` | `.ctxpm/dependencies/rules/` |
 | `spec` | `.ctxpm/packages/specs/` | `.ctxpm/dependencies/specs/` |
 | `prompt` | `.ctxpm/packages/prompts/` | `.ctxpm/dependencies/prompts/` |
+| `memory` | `.ctxpm/packages/memories/` | `.ctxpm/dependencies/memories/` |
 | `mcp` | `.ctxpm/packages/mcp/` | `.ctxpm/dependencies/mcp/` |
 
 ## Shared Resource Fields
@@ -101,6 +103,7 @@ Rules:
 - `layout: dir` means `path` points to a directory resource root.
 - For `layout: file`, `entry` should match the file name in `path`.
 - For `layout: dir`, `entry` must exist inside the directory root.
+- `memory` directory resources should use `MEMORY.md` as the canonical entry file.
 
 ## Dependency Sources
 
