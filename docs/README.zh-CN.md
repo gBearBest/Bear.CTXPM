@@ -18,7 +18,7 @@ Bear.CTXPM 的目标是提供一套 AI 可以直接理解和执行的统一约�
 ## 给 AI 的一句话安装指令
 
 ```text
-请按照 https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/main/INSTALL.md 文档中的说明，对本项目进行检测、安装、初始化与改造，使其成为用于管理 AI 依赖与 AI 资源的 Bear.CTXPM 协议结构。
+请按照 https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/latest/INSTALL.md 文档中的说明，对本项目进行检测、安装、初始化与改造，使其成为用于管理 AI 依赖与 AI 资源的 Bear.CTXPM 协议结构。
 ```
 
 ## 核心目标

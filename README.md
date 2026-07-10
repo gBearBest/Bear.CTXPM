@@ -18,7 +18,7 @@ Bear.CTXPM aims to provide a unified convention that AI can directly understand 
 ## One-line Installation Instruction for AI Agents
 
 ```text
-Please follow the instructions in https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/main/INSTALL.md to inspect, install, initialize, and refactor this project into a Bear.CTXPM-compliant structure for managing AI dependencies and resources.
+Please follow the instructions in https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/latest/INSTALL.md to inspect, install, initialize, and refactor this project into a Bear.CTXPM-compliant structure for managing AI dependencies and resources.
 ```
 
 ## Core Goals
