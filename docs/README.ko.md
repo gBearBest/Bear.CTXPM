@@ -8,7 +8,7 @@ Bear.CTXPM은 AI 리소스를 관리하기 위한 완전한 오픈 소스 프로
 
 ## 배경
 
-AI coding agent, 프로젝트 수준의 skill, rule, spec, prompt, MCP 도구가 일상적인 엔지니어링 워크플로에 점차 들어오면서, 프로젝트에는 두 종류의 AI 리소스가 계속 축적됩니다.
+AI coding agent, 프로젝트 수준의 skill, rule, spec, prompt, memory, MCP 도구가 일상적인 엔지니어링 워크플로에 점차 들어오면서, 프로젝트에는 두 종류의 AI 리소스가 계속 축적됩니다.
 
 - 외부 공유 리소스: 팀 공용 저장소, 서드파티 저장소, 또는 private registry에서 가져오는 리소스입니다. 의존성처럼 참조하고 재사용하고 싶지만, 원본 내용을 프로젝트 버전 관리에 커밋하고 싶지는 않은 리소스입니다.
 - 프로젝트 내부 리소스: 현재 비즈니스, 팀 협업 방식, 코드 구조와 강하게 연결된 리소스입니다. 소스 코드처럼 버전 관리에 포함되고, 리뷰를 거치며, 프로젝트와 함께 발전해야 합니다.
@@ -18,7 +18,7 @@ Bear.CTXPM의 목표는 AI가 직접 이해하고 실행할 수 있는 통합 �
 ## AI를 위한 한 문장 설치 지침
 
 ```text
-https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/main/INSTALL.md 문서의 설명에 따라 이 프로젝트를 검사, 설치, 초기화, 개조하여 AI 의존성과 AI 리소스를 관리하는 Bear.CTXPM 준수 구조로 만들어 주세요.
+https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/latest/INSTALL.md 문서의 설명에 따라 이 프로젝트를 검사, 설치, 초기화, 개조하여 AI 의존성과 AI 리소스를 관리하는 Bear.CTXPM 준수 구조로 만들어 주세요.
 ```
 
 ## 핵심 목표
@@ -26,7 +26,7 @@ https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/main/INSTALL.md 문서의
 Bear.CTXPM v0.1은 먼저 프로토콜이며, 반드시 설치해야 하는 도구가 아닙니다. 다음 사항에 집중합니다.
 
 - 통합된 `dependency` / `package` 모델로 AI 리소스를 관리합니다.
-- 기존 리소스 형식을 바꾸지 않고 일반적인 `skill`, `rule`, `spec`, `prompt`, `mcp` 디렉터리를 연결합니다.
+- 기존 리소스 형식을 바꾸지 않고 일반적인 `skill`, `rule`, `spec`, `prompt`, `memory`, `mcp` 디렉터리를 연결합니다.
 - `ctxpm.yaml`을 통해 프로젝트의 리소스 선언과 엔트리포인트 설정을 설명합니다.
 - `.ctxpm/packages/`와 `.ctxpm/dependencies/`를 통해 프로젝트 내부 리소스와 외부 리소스를 구성합니다.
 - 루트 Markdown 엔트리포인트 문서를 통해 리소스를 여러 agent에 연결합니다.
@@ -50,6 +50,7 @@ resource type은 콘텐츠의 형태를 설명합니다. Bear.CTXPM v0.1의 표�
 - `rule`
 - `spec`
 - `prompt`
+- `memory`
 - `mcp`
 
 `dependency` / `package`는 리소스의 출처와 생명주기를 결정하고, `resource type`은 콘텐츠 형태와 소비 방식을 결정합니다.
@@ -71,12 +72,14 @@ project/
       rules/
       specs/
       prompts/
+      memories/
       mcp/
     packages/
       skills/
       rules/
       specs/
       prompts/
+      memories/
       mcp/
   AGENTS.md / CLAUDE.md / 기타 agent 루트 엔트리포인트 문서
 ```
@@ -93,7 +96,7 @@ project/
 - 프로토콜 우선: Bear.CTXPM은 먼저 문서화된 프로토콜이며, 명령어 모음이 아닙니다.
 - 통합 의미 체계: 사용자에게는 `dependency`와 `package` 두 가지 패키지 의미 체계만 노출합니다.
 - 도구 독립성: 핵심 모델은 특정 agent나 특정 구현 방식에 묶이지 않습니다.
-- 형식 호환성 우선: 기존 skill, rule, spec, prompt, MCP 설정 등의 원래 구성 방식을 우선적으로 호환합니다.
+- 형식 호환성 우선: 기존 skill, rule, spec, prompt, memory, MCP 설정 등의 원래 구성 방식을 우선적으로 호환합니다.
 - AI가 주요 실행자: AI는 프로젝트 프로토콜에 따라 리소스를 식별하고, 정리하고, 설명할 수 있어야 합니다.
 - 엔트리포인트 일관성: 서로 다른 agent가 루트 엔트리포인트 문서를 통해 일관된 리소스 사용 지침을 얻을 수 있어야 합니다.
 - 내부와 외부 분리: 외부 리소스와 프로젝트 내부 리소스는 저장 위치, 버전 관리 정책, 생명주기에서 명확히 분리됩니다.
@@ -106,7 +109,7 @@ AI가 Bear.CTXPM 프로젝트를 맡을 때는 다음 흐름을 따르는 것이
 1. 루트 Markdown 엔트리포인트 문서와 `ctxpm.yaml`을 읽습니다.
 2. 먼저 `.ctxpm/packages/`를 스캔한 뒤, `.ctxpm/dependencies/`를 스캔합니다.
 3. `ctxpm.yaml`의 명시적 선언과 디렉터리 구조를 함께 사용해 리소스를 식별합니다.
-4. 작업 컨텍스트에 따라 어떤 리소스를 읽어야 하는지 판단합니다.
+4. 작업 컨텍스트에 따라 어떤 리소스를 읽어야 하는지 판단합니다. 프로젝트 이력이나 기존 의사결정에 의존하는 작업에서는 `memory` 리소스도 필요에 따라 읽습니다.
 5. 엔트리포인트 문서의 `ctxpm` 관리 블록을 유지하여 리소스 위치, 읽기 우선순위, 충돌 처리 규칙을 명확하고 안정적으로 유지합니다.
 6. 안전하게 작업을 완료할 수 없을 때는 문제를 보고하고 정리 제안을 제공합니다.
 
@@ -125,7 +128,7 @@ Bear.CTXPM v0.1은 다음을 요구하지 않습니다.
 
 Bear.CTXPM은 AI 리소스를 장기적으로 유지 관리하려는 프로젝트에 적합합니다. 특히 다음과 같은 경우에 유용합니다.
 
-- 팀이 공용 AI rule, spec, prompt, skill을 재사용하려는 경우.
+- 팀이 공용 AI rule, spec, prompt, memory, skill을 재사용하려는 경우.
 - 프로젝트 안에 코드와 함께 발전해야 하는 AI 리소스가 이미 있는 경우.
 - 여러 AI agent가 같은 프로젝트 안에서 일관된 리소스 엔트리포인트를 읽어야 하는 경우.
 - 특정 도구 체인에 묶이지 않고 AI 리소스 관리 규약을 세우고 싶은 경우.

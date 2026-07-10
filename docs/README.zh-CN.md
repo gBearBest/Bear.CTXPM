@@ -8,7 +8,7 @@ Bear.CTXPM 是一个完全开源的 AI 资源管理协议。它用统一的 `dep
 
 ## 背景
 
-随着 AI coding agent、项目级 skill、规则、规范、prompt 和 MCP 工具逐渐进入日常工程流程，项目中会持续积累两类 AI 资源：
+随着 AI coding agent、项目级 skill、规则、规范、prompt、记忆和 MCP 工具逐渐进入日常工程流程，项目中会持续积累两类 AI 资源：
 
 - 外部共享资源：来自团队公共仓库、第三方仓库或私有 registry，希望像依赖一样被引用和复用，但不希望把原始内容提交到项目版本控制中。
 - 项目内资源：与当前业务、团队协作方式、代码结构强相关，需要像源码一样进入版本控制、参与 review，并随项目一起演进。
@@ -18,7 +18,7 @@ Bear.CTXPM 的目标是提供一套 AI 可以直接理解和执行的统一约�
 ## 给 AI 的一句话安装指令
 
 ```text
-请按照 https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/main/INSTALL.md 文档中的说明，对本项目进行检测、安装、初始化与改造，使其成为用于管理 AI 依赖与 AI 资源的 Bear.CTXPM 协议结构。
+请按照 https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/latest/INSTALL.md 文档中的说明，对本项目进行检测、安装、初始化与改造，使其成为用于管理 AI 依赖与 AI 资源的 Bear.CTXPM 协议结构。
 ```
 
 ## 核心目标
@@ -26,7 +26,7 @@ Bear.CTXPM 的目标是提供一套 AI 可以直接理解和执行的统一约�
 Bear.CTXPM v0.1 首先是一套协议，而不是一个必须先安装的工具。它聚焦于：
 
 - 用统一的 `dependency` / `package` 模型管理 AI 资源。
-- 在不改造原始资源格式的前提下接入常见 `skill`、`rule`、`spec`、`prompt`、`mcp` 目录。
+- 在不改造原始资源格式的前提下接入常见 `skill`、`rule`、`spec`、`prompt`、`memory`、`mcp` 目录。
 - 通过 `ctxpm.yaml` 描述项目中的资源声明与入口配置。
 - 通过 `.ctxpm/packages/` 与 `.ctxpm/dependencies/` 组织项目内资源和外部资源。
 - 通过根入口 Markdown 文档把资源接入不同 agent。
@@ -50,6 +50,7 @@ Bear.CTXPM v0.1 首先是一套协议，而不是一个必须先安装的工具�
 - `rule`
 - `spec`
 - `prompt`
+- `memory`
 - `mcp`
 
 `dependency` / `package` 决定资源来源与生命周期，`resource type` 决定内容形态与消费方式。
@@ -71,12 +72,14 @@ project/
       rules/
       specs/
       prompts/
+      memories/
       mcp/
     packages/
       skills/
       rules/
       specs/
       prompts/
+      memories/
       mcp/
   AGENTS.md / CLAUDE.md / 其他 agent 根入口文档
 ```
@@ -93,7 +96,7 @@ project/
 - 协议优先：Bear.CTXPM 首先是一套文档化协议，而不是命令集合。
 - 语义统一：对用户只暴露 `dependency` 和 `package` 两种包语义。
 - 工具无关：核心模型不绑定某个 agent 或某种实现方式。
-- 格式兼容优先：优先兼容已有 skill、rule、spec、prompt、MCP 配置等原生组织方式。
+- 格式兼容优先：优先兼容已有 skill、rule、spec、prompt、memory、MCP 配置等原生组织方式。
 - AI 是主要执行者：AI 应能基于项目协议主动识别、整理和解释资源。
 - 入口一致性：不同 agent 应能通过根入口文档获得一致的资源使用指引。
 - 内外分离：外部资源与项目内资源在存储位置、版本控制策略和生命周期上明确区分。
@@ -106,7 +109,7 @@ project/
 1. 读取根入口 Markdown 文档和 `ctxpm.yaml`。
 2. 优先扫描 `.ctxpm/packages/`，再扫描 `.ctxpm/dependencies/`。
 3. 结合 `ctxpm.yaml` 的显式声明和目录结构识别资源。
-4. 根据任务上下文判断需要查阅哪些资源。
+4. 根据任务上下文判断需要查阅哪些资源，包括在任务依赖项目历史或既有决策时按需加载 `memory` 资源。
 5. 维护入口文档中的 `ctxpm` 受管区块，确保资源位置、读取优先级和冲突处理规则清晰稳定。
 6. 在无法安全完成操作时，报告问题并给出整理建议。
 
@@ -125,7 +128,7 @@ Bear.CTXPM v0.1 不要求：
 
 Bear.CTXPM 适合希望长期维护 AI 资源的项目，尤其适用于：
 
-- 团队希望复用公共 AI 规则、规范、prompt 或 skill。
+- 团队希望复用公共 AI 规则、规范、prompt、记忆或 skill。
 - 项目内已经存在需要随代码一起演进的 AI 资源。
 - 多个 AI agent 需要在同一个项目中读取一致的资源入口。
 - 希望在不绑定特定工具链的前提下建立 AI 资源管理约定。

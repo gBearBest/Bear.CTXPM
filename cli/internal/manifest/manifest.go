@@ -31,13 +31,15 @@ var (
 	ErrNotFound = errors.New("ctxpm manifest not found")
 )
 
-var validTypes = map[string]bool{
-	"skill":  true,
-	"rule":   true,
-	"spec":   true,
-	"prompt": true,
-	"mcp":    true,
-}
+var supportedTypes = []string{"skill", "rule", "spec", "prompt", "mcp", "memory"}
+
+var validTypes = func() map[string]bool {
+	values := map[string]bool{}
+	for _, resourceType := range supportedTypes {
+		values[resourceType] = true
+	}
+	return values
+}()
 
 type Manifest struct {
 	Version      string                `yaml:"version"`
@@ -352,6 +354,9 @@ func (r Resource) EffectiveEntry() string {
 		if r.Type == "skill" {
 			return "SKILL.md"
 		}
+		if r.Type == "memory" {
+			return "MEMORY.md"
+		}
 	}
 	return ""
 }
@@ -463,9 +468,15 @@ func TypeDir(resourceType string) string {
 		return "prompts"
 	case "mcp":
 		return "mcp"
+	case "memory":
+		return "memories"
 	default:
 		return resourceType + "s"
 	}
+}
+
+func SupportedTypes() []string {
+	return append([]string(nil), supportedTypes...)
 }
 
 func EntrypointFile(agent string) string {

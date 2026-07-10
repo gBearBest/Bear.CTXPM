@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/gBearBest/Bear.CTXPM/cli/internal/engine"
+	"github.com/gBearBest/Bear.CTXPM/cli/internal/manifest"
 )
 
 type commandError struct {
@@ -91,6 +92,8 @@ func run(args []string) error {
 		return runUpdate(app, args[1:])
 	case "remove":
 		return runRemove(app, args[1:])
+	case "memory":
+		return runMemory(app, args[1:])
 	default:
 		return failf(2, "unknown command %q", args[0])
 	}
@@ -134,7 +137,7 @@ func runAdd(app *engine.App, args []string) error {
 	})
 	fs := flag.NewFlagSet("add", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	resourceType := fs.String("type", "", "Resource type: skill|rule|spec|prompt|mcp")
+	resourceType := fs.String("type", "", "Resource type: "+resourceTypeUsage())
 	name := fs.String("name", "", "Override resource name")
 	layout := fs.String("layout", "", "Resource layout: file|dir")
 	sourceType := fs.String("source-type", "", "Source type: git|url|archive")
@@ -340,6 +343,114 @@ func runRemove(app *engine.App, args []string) error {
 	return printMaybeJSON(result, *jsonOutput)
 }
 
+func runMemory(app *engine.App, args []string) error {
+	if len(args) == 0 {
+		return failf(2, "usage: ctxpm memory <capture|search|suggest|prune> [options]")
+	}
+	switch args[0] {
+	case "capture":
+		return runMemoryCapture(app, args[1:])
+	case "search":
+		return runMemorySearch(app, args[1:])
+	case "suggest":
+		return runMemorySuggest(app, args[1:])
+	case "prune":
+		return runMemoryPrune(app, args[1:])
+	default:
+		return failf(2, "unknown memory command %q", args[0])
+	}
+}
+
+func runMemoryCapture(app *engine.App, args []string) error {
+	fs := flag.NewFlagSet("memory capture", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	topic := fs.String("topic", "", "Optional memory topic")
+	summary := fs.String("summary", "", "Memory summary content")
+	resource := fs.String("resource", "", "Target writable memory resource")
+	title := fs.String("title", "", "Optional entry title override")
+	write := fs.Bool("write", false, "Persist the generated memory entry")
+	jsonOutput := fs.Bool("json", false, "Emit JSON output")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	result, err := app.MemoryCapture(engine.MemoryCaptureOptions{
+		Topic:    *topic,
+		Summary:  *summary,
+		Resource: *resource,
+		Title:    *title,
+		Write:    *write,
+	})
+	if err != nil {
+		return err
+	}
+	return printMaybeJSON(result, *jsonOutput)
+}
+
+func runMemorySearch(app *engine.App, args []string) error {
+	fs := flag.NewFlagSet("memory search", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	query := fs.String("query", "", "Free-text query")
+	resource := fs.String("resource", "", "Filter by memory resource name")
+	title := fs.String("title", "", "Filter by document title")
+	tag := fs.String("tag", "", "Filter by tag")
+	path := fs.String("path", "", "Filter by relative file path")
+	jsonOutput := fs.Bool("json", false, "Emit JSON output")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	result, err := app.MemorySearch(engine.MemorySearchOptions{
+		Query:    *query,
+		Resource: *resource,
+		Title:    *title,
+		Tag:      *tag,
+		Path:     *path,
+	})
+	if err != nil {
+		return err
+	}
+	return printMaybeJSON(result, *jsonOutput)
+}
+
+func runMemorySuggest(app *engine.App, args []string) error {
+	fs := flag.NewFlagSet("memory suggest", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	topic := fs.String("topic", "", "Optional memory topic")
+	summary := fs.String("summary", "", "Task summary to evaluate")
+	resource := fs.String("resource", "", "Preferred writable memory resource")
+	jsonOutput := fs.Bool("json", false, "Emit JSON output")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	result, err := app.MemorySuggest(engine.MemorySuggestOptions{
+		Topic:    *topic,
+		Summary:  *summary,
+		Resource: *resource,
+	})
+	if err != nil {
+		return err
+	}
+	return printMaybeJSON(result, *jsonOutput)
+}
+
+func runMemoryPrune(app *engine.App, args []string) error {
+	fs := flag.NewFlagSet("memory prune", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	resource := fs.String("resource", "", "Filter by memory resource name")
+	archive := fs.Bool("archive", false, "Archive duplicate and empty files in package memories")
+	jsonOutput := fs.Bool("json", false, "Emit JSON output")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	result, err := app.MemoryPrune(engine.MemoryPruneOptions{
+		Resource: *resource,
+		Archive:  *archive,
+	})
+	if err != nil {
+		return err
+	}
+	return printMaybeJSON(result, *jsonOutput)
+}
+
 func printMaybeJSON(value any, jsonOutput bool) error {
 	if jsonOutput {
 		encoder := json.NewEncoder(os.Stdout)
@@ -373,6 +484,7 @@ func printHelp(w *os.File) {
 		"  migrate        Migrate detected AI resources into ctxpm-managed roots",
 		"  install        Install dependencies and repair compatibility links",
 		"  list           List dependencies and packages",
+		"  memory         Search, suggest, capture, or prune project memories",
 		"  validate       Validate ctxpm.yaml and local paths",
 		"  check-updates  Check whether dependencies have upstream updates",
 		"  update         Apply dependency updates, rewrite manifest versions, and install resources",
@@ -383,10 +495,15 @@ func printHelp(w *os.File) {
 		"  ctxpm init --agent codex",
 		"  ctxpm add https://github.com/example/ai/tree/main/skills/reviewer --type skill",
 		"  ctxpm add https://gitlab.company.com/team/ai-resources.git --type rule --source-path rules/security",
+		"  ctxpm memory search --query billing",
 		"  ctxpm install",
 		"  ctxpm update --all",
 	}
 	fmt.Fprintln(w, strings.Join(lines, "\n"))
+}
+
+func resourceTypeUsage() string {
+	return strings.Join(manifest.SupportedTypes(), "|")
 }
 
 func runVersion() error {

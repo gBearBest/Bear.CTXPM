@@ -2,6 +2,8 @@
 
 `ctxpm` is the bundled Bear.CTXPM management skill. It gives future AI agents one explicit workflow for creating, installing, validating, updating, and removing AI resources in a project.
 
+Managed resource types include `skill`, `rule`, `spec`, `prompt`, `memory`, and `mcp`.
+
 ## Canonical Resource Root
 
 Treat the bundled `ctxpm` skill as a **directory resource root**, not a single Markdown file.
@@ -88,6 +90,10 @@ When the companion CLI is available, prefer it for routine lifecycle operations:
 - `ctxpm check-updates`
 - `ctxpm update`
 - `ctxpm remove`
+- `ctxpm memory search`
+- `ctxpm memory suggest`
+- `ctxpm memory capture`
+- `ctxpm memory prune`
 
 Run `ctxpm detect` on a shorter cadence than `ctxpm check-updates` so newly added AI resources in non-ctxpm locations are caught early, then migrate them and validate the result after user confirmation.
 
@@ -125,12 +131,12 @@ dependencies:
 
 packages:
   - name: project-resource
-    type: rule
-    layout: file
-    path: .ctxpm/packages/rules/project-resource.md
-    entry: project-resource.md
+    type: memory
+    layout: dir
+    path: .ctxpm/packages/memories/project-resource
+    entry: MEMORY.md
     compatibility:
-      - .agents/rules/project-resource.md
+      - .agents/memories/project-resource
 
 entrypoints:
   codex:
@@ -155,6 +161,7 @@ entrypoints:
 2. Check that the shape matches `layout`.
 3. Check that the declared `entry` exists inside the root.
 4. Check that compatibility links exist.
+5. For `memory` directory resources, validate any `index.json` or `index.jsonl` references that point to other files inside the resource root.
 
 ### Update
 
