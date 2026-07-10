@@ -8,7 +8,7 @@ Bear.CTXPM is a fully open-source protocol for managing AI resources. It uses un
 
 ## Background
 
-As AI coding agents, project-level skills, rules, specifications, prompts, and MCP tools become part of everyday engineering workflows, projects continuously accumulate two kinds of AI resources:
+As AI coding agents, project-level skills, rules, specifications, prompts, memories, and MCP tools become part of everyday engineering workflows, projects continuously accumulate two kinds of AI resources:
 
 - External shared resources: resources from team-wide repositories, third-party repositories, or private registries that should be referenced and reused like dependencies, but whose original content should not be committed into the project.
 - Project-local resources: resources tightly coupled to the current business domain, collaboration model, and code structure. They should be versioned like source code, participate in review, and evolve with the project.
@@ -18,7 +18,7 @@ Bear.CTXPM aims to provide a unified convention that AI can directly understand 
 ## One-line Installation Instruction for AI Agents
 
 ```text
-Please follow the instructions in https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/main/INSTALL.md to inspect, install, initialize, and refactor this project into a Bear.CTXPM-compliant structure for managing AI dependencies and resources.
+Please follow the instructions in https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/latest/INSTALL.md to inspect, install, initialize, and refactor this project into a Bear.CTXPM-compliant structure for managing AI dependencies and resources.
 ```
 
 ## Core Goals
@@ -26,7 +26,7 @@ Please follow the instructions in https://raw.githubusercontent.com/gBearBest/Be
 Bear.CTXPM v0.1 is first a protocol, not a tool that must be installed. It focuses on:
 
 - Managing AI resources with a unified `dependency` / `package` model.
-- Integrating common `skill`, `rule`, `spec`, `prompt`, and `mcp` directories without transforming their original formats.
+- Integrating common `skill`, `rule`, `spec`, `prompt`, `memory`, and `mcp` directories without transforming their original formats.
 - Describing resource declarations and entrypoint configuration through `ctxpm.yaml`.
 - Organizing project-local and external resources through `.ctxpm/packages/` and `.ctxpm/dependencies/`.
 - Connecting resources to different agents through root Markdown entrypoint documents.
@@ -50,6 +50,7 @@ A resource type describes the shape of the content. Standard resource types in B
 - `rule`
 - `spec`
 - `prompt`
+- `memory`
 - `mcp`
 
 `dependency` / `package` determines the source and lifecycle of a resource, while `resource type` determines its content shape and consumption method.
@@ -71,12 +72,14 @@ project/
       rules/
       specs/
       prompts/
+      memories/
       mcp/
     packages/
       skills/
       rules/
       specs/
       prompts/
+      memories/
       mcp/
   AGENTS.md / CLAUDE.md / other agent root entrypoint documents
 ```
@@ -93,7 +96,7 @@ Where:
 - Protocol first: Bear.CTXPM is first a documented protocol, not a command set.
 - Unified semantics: expose only two package semantics to users, `dependency` and `package`.
 - Tool agnostic: the core model is not bound to any specific agent or implementation.
-- Format compatibility first: prioritize compatibility with existing native organization patterns for skills, rules, specs, prompts, MCP configuration, and similar resources.
+- Format compatibility first: prioritize compatibility with existing native organization patterns for skills, rules, specs, prompts, memories, MCP configuration, and similar resources.
 - AI as the primary executor: AI should be able to identify, organize, and explain resources based on the project protocol.
 - Entry consistency: different agents should obtain consistent resource usage guidance through root entrypoint documents.
 - Internal and external separation: external resources and project-local resources have clearly separated storage locations, version control policies, and lifecycles.
@@ -106,7 +109,7 @@ When an AI takes over a Bear.CTXPM project, it is recommended to follow this wor
 1. Read the root Markdown entrypoint documents and `ctxpm.yaml`.
 2. Scan `.ctxpm/packages/` first, then `.ctxpm/dependencies/`.
 3. Identify resources by combining explicit declarations in `ctxpm.yaml` with the directory structure.
-4. Decide which resources to read based on the task context.
+4. Decide which resources to read based on the task context, including loading `memory` resources on demand when a task depends on project history or prior decisions.
 5. Maintain the managed `ctxpm` block in entrypoint documents so resource locations, reading priority, and conflict handling rules remain clear and stable.
 6. When an operation cannot be completed safely, report the issue and provide organization suggestions.
 
@@ -125,7 +128,7 @@ Bear.CTXPM v0.1 does not require:
 
 Bear.CTXPM is suitable for projects that want to maintain AI resources over the long term, especially when:
 
-- Teams want to reuse shared AI rules, specifications, prompts, or skills.
+- Teams want to reuse shared AI rules, specifications, prompts, memories, or skills.
 - A project already has AI resources that need to evolve together with the code.
 - Multiple AI agents need to read consistent resource entrypoints in the same project.
 - Teams want to establish AI resource management conventions without binding themselves to a specific toolchain.

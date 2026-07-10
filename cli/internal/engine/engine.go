@@ -188,11 +188,13 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 		filepath.Join(a.Root, ".ctxpm", "dependencies", "specs"),
 		filepath.Join(a.Root, ".ctxpm", "dependencies", "prompts"),
 		filepath.Join(a.Root, ".ctxpm", "dependencies", "mcp"),
+		filepath.Join(a.Root, ".ctxpm", "dependencies", "memories"),
 		filepath.Join(a.Root, ".ctxpm", "packages", "skills"),
 		filepath.Join(a.Root, ".ctxpm", "packages", "rules"),
 		filepath.Join(a.Root, ".ctxpm", "packages", "specs"),
 		filepath.Join(a.Root, ".ctxpm", "packages", "prompts"),
 		filepath.Join(a.Root, ".ctxpm", "packages", "mcp"),
+		filepath.Join(a.Root, ".ctxpm", "packages", "memories"),
 		filepath.Join(a.Root, ".ctxpm", "state"),
 	}
 	for _, dir := range dirs {
@@ -477,6 +479,7 @@ func (a *App) Validate() (*ValidateResult, error) {
 		if err := validateResolvedResource(abs, dep); err != nil {
 			issues = append(issues, err.Error())
 		}
+		issues = append(issues, validateMemoryResource(abs, dep)...)
 		for _, compat := range dep.Compatibility {
 			compatAbs := filepath.Join(a.Root, filepath.FromSlash(compat))
 			if _, err := os.Lstat(compatAbs); err != nil {
@@ -489,6 +492,7 @@ func (a *App) Validate() (*ValidateResult, error) {
 		if err := validateResolvedResource(abs, pkg); err != nil {
 			issues = append(issues, err.Error())
 		}
+		issues = append(issues, validateMemoryResource(abs, pkg)...)
 		for _, compat := range pkg.Compatibility {
 			compatAbs := filepath.Join(a.Root, filepath.FromSlash(compat))
 			if _, err := os.Lstat(compatAbs); err != nil {

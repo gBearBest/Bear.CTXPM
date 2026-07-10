@@ -3,14 +3,15 @@ This project uses `ctxpm` to manage AI resources.
 
 Read AI resources in this order:
 1. Read `ctxpm.yaml`.
-2. Read `.ctxpm/packages/` before `.ctxpm/dependencies/`.
-3. Within each root, use this default lookup order:
+2. Read relevant resources under `.ctxpm/packages/` before `.ctxpm/dependencies/`.
+3. Within each root, use this default lookup order for fixed-priority resource types:
    - `rules`
    - `skills`
    - `specs`
    - `prompts`
    - `mcp`
-4. When resources conflict, project-local `packages` take precedence over external `dependencies`.
+4. `memories` do not use a fixed global read order. When a task depends on historical decisions, project background, terminology, prior migrations, known pitfalls, or other context, inspect relevant `memories` on demand.
+5. When resources conflict, project-local `packages` take precedence over external `dependencies`, and `rules` take precedence over `memories`.
 
 Do not install AI resources directly into agent default locations. Before creating, reading, updating, or deleting any AI resource, use the companion `ctxpm` CLI when it is available. If the CLI is unavailable, use the `ctxpm` skill if it is available. Otherwise follow the same `ctxpm` classification, migration, compatibility-symlink, `.gitignore`, source-version, update-detection, and `ctxpm.yaml` update rules used by this project.
 
