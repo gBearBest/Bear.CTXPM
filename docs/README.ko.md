@@ -18,7 +18,7 @@ Bear.CTXPM의 목표는 AI가 직접 이해하고 실행할 수 있는 통합 �
 ## AI를 위한 한 문장 설치 지침
 
 ```text
-https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/main/INSTALL.md 문서의 설명에 따라 이 프로젝트를 검사, 설치, 초기화, 개조하여 AI 의존성과 AI 리소스를 관리하는 Bear.CTXPM 준수 구조로 만들어 주세요.
+https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/latest/INSTALL.md 문서의 설명에 따라 이 프로젝트를 검사, 설치, 초기화, 개조하여 AI 의존성과 AI 리소스를 관리하는 Bear.CTXPM 준수 구조로 만들어 주세요.
 ```
 
 ## 핵심 목표
