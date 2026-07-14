@@ -10,15 +10,20 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime/debug"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/gBearBest/Bear.CTXPM/cli/internal/manifest"
 )
 
-func ensureManagedEntrypoint(path, agent string, allowRepair bool) error {
-	content := manifest.ManagedEntrypoint(agent)
+type managedEntrypointState struct {
+	HasManagedBlock bool
+	Damaged         bool
+	Block           string
+}
+
+func ensureManagedEntrypoint(path string, allowRepair bool) error {
+	content := manifest.ManagedEntrypoint()
 	existing, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -37,48 +42,13 @@ func ensureManagedEntrypoint(path, agent string, allowRepair bool) error {
 	return os.WriteFile(path, []byte(updated), 0o644)
 }
 
-func refreshManagedEntrypoints(root string, m *manifest.Manifest, allowRepair bool) error {
-	if m == nil || len(m.Entrypoints) == 0 {
-		return nil
-	}
-
-	agents := make([]string, 0, len(m.Entrypoints))
-	for agent, entrypoint := range m.Entrypoints {
-		if strings.TrimSpace(entrypoint.Mode) != "managed" {
-			continue
-		}
-		agents = append(agents, agent)
-	}
-	sort.Strings(agents)
-	for _, agent := range agents {
-		entrypoint := m.Entrypoints[agent]
-		entrypointFile := strings.TrimSpace(entrypoint.File)
-		if entrypointFile == "" {
-			entrypointFile = manifest.EntrypointFile(agent)
-		}
-		if err := ensureManagedEntrypoint(filepath.Join(root, entrypointFile), agent, allowRepair); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func updateManagedBlock(existing, block string, allowRepair bool) (string, error) {
-	const begin = "<!-- ctxpm:begin agent="
-	const end = "<!-- ctxpm:end -->"
-
-	start := strings.Index(existing, begin)
-	endIndex := strings.Index(existing, end)
-	if start == -1 && endIndex == -1 {
+	start, endIndex, damaged := locateManagedBlock(existing)
+	if start == -1 && endIndex == -1 && !damaged {
 		return appendManagedBlock(existing, block), nil
 	}
 	if start >= 0 && endIndex > start {
-		rest := existing[start:]
-		relativeEndIndex := strings.Index(rest, end)
-		if relativeEndIndex >= 0 {
-			relativeEndIndex += start + len(end)
-			return joinManagedBlock(existing[:start], existing[relativeEndIndex:], block), nil
-		}
+		return joinManagedBlock(existing[:start], existing[endIndex:], block), nil
 	}
 	if !allowRepair {
 		return "", fmt.Errorf("managed ctxpm block is damaged; rerun with --force to rebuild it")
@@ -87,21 +57,53 @@ func updateManagedBlock(existing, block string, allowRepair bool) (string, error
 }
 
 func rebuildManagedBlock(existing, block string) string {
-	const begin = "<!-- ctxpm:begin agent="
-	const end = "<!-- ctxpm:end -->"
-
-	start := strings.Index(existing, begin)
-	endIndex := strings.LastIndex(existing, end)
+	start, endIndex, _ := locateManagedBlock(existing)
 	switch {
 	case start >= 0 && endIndex > start:
-		return joinManagedBlock(existing[:start], existing[endIndex+len(end):], block)
+		return joinManagedBlock(existing[:start], existing[endIndex:], block)
 	case start >= 0:
 		return joinManagedBlock(existing[:start], "", block)
-	case endIndex >= 0:
-		return joinManagedBlock("", existing[endIndex+len(end):], block)
+	case endIndex > 0:
+		return joinManagedBlock("", existing[endIndex:], block)
 	default:
 		return appendManagedBlock(existing, block)
 	}
+}
+
+func readManagedEntrypointState(path string) (managedEntrypointState, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return managedEntrypointState{}, err
+	}
+	start, endIndex, damaged := locateManagedBlock(string(data))
+	state := managedEntrypointState{
+		HasManagedBlock: start >= 0 || endIndex >= 0,
+		Damaged:         damaged,
+	}
+	if start >= 0 && endIndex > start {
+		state.Block = string(data[start:endIndex])
+	}
+	return state, nil
+}
+
+func locateManagedBlock(content string) (int, int, bool) {
+	beginIndex := strings.Index(content, "<!-- ctxpm:begin")
+	endIndex := strings.Index(content, "<!-- ctxpm:end -->")
+	if beginIndex == -1 && endIndex == -1 {
+		return -1, -1, false
+	}
+	if beginIndex >= 0 {
+		lineEnd := strings.Index(content[beginIndex:], "\n")
+		if lineEnd == -1 {
+			return beginIndex, -1, true
+		}
+		beginIndex += 0
+	}
+	if beginIndex >= 0 && endIndex > beginIndex {
+		endIndex += len("<!-- ctxpm:end -->")
+		return beginIndex, endIndex, false
+	}
+	return beginIndex, endIndex, true
 }
 
 func appendManagedBlock(existing, block string) string {

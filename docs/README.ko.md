@@ -57,7 +57,7 @@ resource type은 콘텐츠의 형태를 설명합니다. Bear.CTXPM v0.1의 표�
 
 ### entrypoint
 
-`entrypoint`는 agent가 읽기 위해 프로젝트 루트에 배치되는 Markdown 엔트리 파일입니다. 예를 들어 `AGENTS.md`, `CLAUDE.md`가 있습니다. Bear.CTXPM은 엔트리포인트 문서 안의 `ctxpm` 관리 블록을 통해 여러 agent에 일관된 리소스 읽기 지침을 제공합니다. 관리 블록은 `INSTALL.md`에 정의된 canonical template을 사용해야 하며, 파일마다 달라질 수 있는 것은 해당 엔트리포인트의 agent 식별자뿐입니다. 기본적으로 관리 대상 리소스는 해당 resource type에 대해 선언된 각 agent가 인식할 수 있는 discovery directory에도 compatibility symlink로 노출되며, canonical 콘텐츠는 `.ctxpm/...` 아래에 유지됩니다.
+`entrypoint`는 agent가 `.ctxpm/...`를 읽기 전에 먼저 확인하는 루트 Markdown 엔트리 표면입니다. 공유 엔트리포인트 모델에서는 `AGENTS.md`가 유일한 canonical managed file이며, `CLAUDE.md`, `ANTIGRAVITY.md` 같은 agent별 루트 파일명은 `AGENTS.md`를 가리키는 compatibility symlink로 취급합니다. Bear.CTXPM은 `AGENTS.md` 안의 `ctxpm` 관리 블록으로 공통 리소스 읽기 지침을 제공하고, `ctxpm.yaml`로 어떤 agent profile이 활성화되어 있는지와 어떤 루트 파일명이 이 canonical 파일로 해석되어야 하는지를 선언합니다.
 
 ## 권장 디렉터리 구조
 
@@ -81,7 +81,9 @@ project/
       prompts/
       memories/
       mcp/
-  AGENTS.md / CLAUDE.md / 기타 agent 루트 엔트리포인트 문서
+  AGENTS.md
+  CLAUDE.md -> AGENTS.md
+  ANTIGRAVITY.md -> AGENTS.md
 ```
 
 각 항목의 의미는 다음과 같습니다.
@@ -89,7 +91,8 @@ project/
 - `ctxpm.yaml`: 사용자와 AI가 함께 유지 관리하는 프로젝트 manifest입니다.
 - `.ctxpm/dependencies/`: 외부 리소스 워크스페이스이며, 기본적으로 `.gitignore`에 추가해야 합니다.
 - `.ctxpm/packages/`: 프로젝트 내부 리소스 디렉터리이며, 기본적으로 버전 관리에 포함해야 합니다.
-- 루트 Markdown 엔트리포인트 문서: AI가 프로젝트에 들어온 뒤 가장 먼저 읽는 진입점입니다.
+- `AGENTS.md`: canonical shared 루트 엔트리포인트 파일입니다.
+- 기타 루트 엔트리포인트 파일명: 선언된 agent가 특정 파일명을 기대할 때 `AGENTS.md`로 되돌아가는 compatibility symlink입니다.
 
 ## 설계 원칙
 
@@ -106,11 +109,11 @@ project/
 
 AI가 Bear.CTXPM 프로젝트를 맡을 때는 다음 흐름을 따르는 것이 좋습니다.
 
-1. 루트 Markdown 엔트리포인트 문서와 `ctxpm.yaml`을 읽습니다.
+1. 먼저 `AGENTS.md`와 `ctxpm.yaml`을 읽고, 이어서 `ctxpm.yaml`에 선언된 agent profile 매핑을 따릅니다.
 2. 먼저 `.ctxpm/packages/`를 스캔한 뒤, `.ctxpm/dependencies/`를 스캔합니다.
 3. `ctxpm.yaml`의 명시적 선언과 디렉터리 구조를 함께 사용해 리소스를 식별합니다.
 4. 작업 컨텍스트에 따라 어떤 리소스를 읽어야 하는지 판단합니다. 프로젝트 이력이나 기존 의사결정에 의존하는 작업에서는 `memory` 리소스도 필요에 따라 읽습니다.
-5. 엔트리포인트 문서의 `ctxpm` 관리 블록을 유지하여 리소스 위치, 읽기 우선순위, 충돌 처리 규칙을 명확하고 안정적으로 유지합니다.
+5. `AGENTS.md` 안의 `ctxpm` 관리 블록을 유지하고, agent별 루트 엔트리포인트 alias가 그 canonical 파일과 계속 동기화되도록 합니다.
 6. 안전하게 작업을 완료할 수 없을 때는 문제를 보고하고 정리 제안을 제공합니다.
 
 ## v0.1의 비목표
