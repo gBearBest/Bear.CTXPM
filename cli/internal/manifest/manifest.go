@@ -63,7 +63,7 @@ type UpdatePolicy struct {
 
 type Entrypoint struct {
 	File string `yaml:"file"`
-	Mode string `yaml:"mode"`
+	Mode string `yaml:"mode,omitempty"`
 }
 
 type Resource struct {
@@ -256,6 +256,14 @@ func (m *Manifest) Validate() error {
 	}
 	for _, pkg := range m.Packages {
 		if err := pkg.validate("package"); err != nil {
+			return err
+		}
+	}
+	for agent, entrypoint := range m.Entrypoints {
+		if strings.TrimSpace(agent) == "" {
+			return errors.New("entrypoints keys must not be empty")
+		}
+		if err := entrypoint.validate(agent); err != nil {
 			return err
 		}
 	}
@@ -479,6 +487,10 @@ func SupportedTypes() []string {
 	return append([]string(nil), supportedTypes...)
 }
 
+func CanonicalEntrypointFile() string {
+	return "AGENTS.md"
+}
+
 func EntrypointFile(agent string) string {
 	switch agent {
 	case "claude-code":
@@ -490,8 +502,28 @@ func EntrypointFile(agent string) string {
 	}
 }
 
-func ManagedEntrypoint(agent string) string {
-	return strings.Replace(managedEntrypointTemplate, "<agent-id>", agent, 1)
+func ManagedEntrypoint() string {
+	return managedEntrypointTemplate
+}
+
+func (e Entrypoint) EffectiveMode() string {
+	mode := strings.TrimSpace(e.Mode)
+	if mode == "" {
+		return "managed"
+	}
+	return mode
+}
+
+func (e Entrypoint) validate(agent string) error {
+	if err := validateRelativePath(e.File, fmt.Sprintf("entrypoints %q file", agent)); err != nil {
+		return err
+	}
+	switch e.EffectiveMode() {
+	case "managed":
+		return nil
+	default:
+		return fmt.Errorf("entrypoints %q has unsupported mode %q", agent, e.Mode)
+	}
 }
 
 func (m *Manifest) HasResource(name string) bool {

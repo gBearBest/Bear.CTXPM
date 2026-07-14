@@ -28,6 +28,9 @@ entrypoints:
   codex:
     file: AGENTS.md
     mode: managed
+  claude-code:
+    file: AGENTS.md
+    mode: managed
 ```
 
 ## Top-Level Fields
@@ -40,7 +43,7 @@ entrypoints:
 | `update_policy` | No | Policy for dependency update checks. |
 | `dependencies` | Yes | External AI resources managed under `.ctxpm/dependencies/`. |
 | `packages` | Yes | Project-local AI resources managed under `.ctxpm/packages/`. |
-| `entrypoints` | Yes | Root Markdown entrypoint files managed for each agent. |
+| `entrypoints` | Yes | Canonical root Markdown entrypoint mapping for each declared agent profile. |
 
 ## Core Concepts
 
@@ -260,7 +263,7 @@ Rules:
 
 ## `entrypoints`
 
-`entrypoints` records root Markdown files that contain managed `ctxpm` blocks.
+`entrypoints` records which canonical shared root Markdown file each declared agent profile uses.
 
 ```yaml
 entrypoints:
@@ -268,15 +271,17 @@ entrypoints:
     file: AGENTS.md
     mode: managed
   claude-code:
-    file: CLAUDE.md
+    file: AGENTS.md
     mode: managed
 ```
 
 Rules:
 
 - Keys should match entries in `agents`.
-- `file` is the root entrypoint Markdown file.
-- `mode` should be `managed` when the file contains a managed `ctxpm` block.
+- `file` is the canonical root entrypoint Markdown file for that agent profile.
+- In the shared-entrypoint model, multiple agent profiles can point at the same canonical `AGENTS.md`.
+- `mode` should be `managed` for the shared root entrypoint model.
+- Agent-specific root filenames such as `CLAUDE.md` or `ANTIGRAVITY.md` are compatibility symlinks inferred from the declared agent profiles and should point back to `AGENTS.md`.
 
 ## Compatibility Paths
 

@@ -157,7 +157,7 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 			Packages:     []manifest.Resource{},
 			Entrypoints: map[string]manifest.Entrypoint{
 				opts.Agent: {
-					File: manifest.EntrypointFile(opts.Agent),
+					File: manifest.CanonicalEntrypointFile(),
 					Mode: "managed",
 				},
 			},
@@ -176,7 +176,8 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 		m.Entrypoints = map[string]manifest.Entrypoint{}
 	}
 	delete(m.Entrypoints, "")
-	m.Entrypoints[opts.Agent] = manifest.Entrypoint{File: manifest.EntrypointFile(opts.Agent), Mode: "managed"}
+	m.Entrypoints[opts.Agent] = manifest.Entrypoint{File: manifest.CanonicalEntrypointFile(), Mode: "managed"}
+	normalizeSharedEntrypoints(m)
 	if m.UpdatePolicy.Enabled == nil && strings.TrimSpace(m.UpdatePolicy.Interval) == "" && m.UpdatePolicy.IncludeSelf == nil {
 		m.UpdatePolicy = manifest.DefaultPolicy()
 	}
@@ -219,12 +220,14 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 	sortResources(m.Packages)
 	sortResources(m.Dependencies)
 
-	entrypointFile := filepath.Join(a.Root, manifest.EntrypointFile(opts.Agent))
+	entrypointFile := filepath.Join(a.Root, manifest.CanonicalEntrypointFile())
 	files = append(files, entrypointFile)
 	if !opts.DryRun {
-		if err := ensureManagedEntrypoint(entrypointFile, opts.Agent, opts.Force); err != nil {
+		entrypointFiles, err := syncManagedEntrypoints(a.Root, m, opts.Force)
+		if err != nil {
 			return nil, err
 		}
+		files = append(files, entrypointFiles...)
 	}
 
 	ctxpmResource := bundledCtxpmResource(m.Agents)
@@ -254,6 +257,7 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 			compatibilityGitignoreRules(m.Dependencies)...,
 		))
 		gitignoreRules = dedupe(append(gitignoreRules, compatibilityGitignoreRules(m.Packages)...))
+		gitignoreRules = dedupe(append(gitignoreRules, entrypointGitignoreRules(m)...))
 		updated, err := ensureGitignoreRules(gitignorePath, gitignoreRules)
 		if err != nil {
 			return nil, err
@@ -275,7 +279,7 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 		Files:                      dedupe(files),
 		DryRun:                     opts.DryRun,
 		Agent:                      opts.Agent,
-		EntrypointFile:             manifest.EntrypointFile(opts.Agent),
+		EntrypointFile:             manifest.CanonicalEntrypointFile(),
 		PackagesCreated:            resourceNames(resourcePlan.packages),
 		DependenciesCreated:        dedupe(append(resourceNames(resourcePlan.dependencies), "ctxpm")),
 		MigratedResources:          resourcePlan.migrated,
@@ -474,6 +478,7 @@ func (a *App) Validate() (*ValidateResult, error) {
 	if err := m.Validate(); err != nil {
 		issues = append(issues, err.Error())
 	}
+	issues = append(issues, validateManagedEntrypoints(a.Root, m)...)
 	for _, dep := range m.Dependencies {
 		abs := filepath.Join(a.Root, filepath.FromSlash(dep.Path))
 		if err := validateResolvedResource(abs, dep); err != nil {
@@ -548,7 +553,7 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 	if err != nil {
 		return nil, err
 	}
-	manifestChanged := false
+	manifestChanged := normalizeSharedEntrypoints(m)
 	for _, candidate := range discoveredCanonical {
 		if m.HasResource(candidate.resource.Name) {
 			continue
@@ -638,11 +643,17 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 			return nil, err
 		}
 	}
-	if !opts.DryRun && len(installedResources) > 0 {
+	if !opts.DryRun {
+		if _, err := syncManagedEntrypoints(a.Root, m, false); err != nil {
+			return nil, err
+		}
+	}
+	if !opts.DryRun && (len(installedResources) > 0 || len(entrypointGitignoreRules(m)) > 0) {
 		gitignoreRules := dedupe(append(
 			[]string{".ctxpm/dependencies/", ".ctxpm/state/"},
 			compatibilityGitignoreRules(installedResources)...,
 		))
+		gitignoreRules = dedupe(append(gitignoreRules, entrypointGitignoreRules(m)...))
 		if _, err := ensureGitignoreRules(filepath.Join(a.Root, ".gitignore"), gitignoreRules); err != nil {
 			return nil, err
 		}
@@ -822,6 +833,7 @@ func (a *App) Update(ctx context.Context, opts UpdateOptions) (*UpdateResult, er
 	if err != nil {
 		return nil, err
 	}
+	normalizeSharedEntrypoints(m)
 	check, err := a.CheckUpdates(ctx, CheckUpdatesOptions{Force: true})
 	if err != nil {
 		return nil, err
@@ -891,7 +903,12 @@ func (a *App) Update(ctx context.Context, opts UpdateOptions) (*UpdateResult, er
 		}
 	}
 	if !opts.DryRun {
-		if err := refreshManagedEntrypoints(a.Root, m, false); err != nil {
+		if _, err := syncManagedEntrypoints(a.Root, m, false); err != nil {
+			return nil, err
+		}
+	}
+	if !opts.DryRun && (len(versionUpdates) > 0 || len(m.Entrypoints) > 0) {
+		if _, err := manifest.Save(a.Root, m); err != nil {
 			return nil, err
 		}
 	}

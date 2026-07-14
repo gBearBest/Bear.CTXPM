@@ -57,7 +57,7 @@ Bear.CTXPM v0.1 首先是一套协议，而不是一个必须先安装的工具�
 
 ### entrypoint
 
-`entrypoint` 指项目根目录中供 agent 读取的 Markdown 入口文件，例如 `AGENTS.md`、`CLAUDE.md`。Bear.CTXPM 会通过入口文档中的 `ctxpm` 受管区块，为不同 agent 提供一致的资源读取说明。受管区块应使用 `INSTALL.md` 中定义的 canonical template，各文件之间只应变更入口文件对应的 agent 标识符。默认情况下，受管资源还应通过 compatibility symlink 暴露到每个已声明 agent 可识别的对应资源类型发现目录中，而 canonical 内容仍保留在 `.ctxpm/...` 下。
+`entrypoint` 指 agent 在扫描 `.ctxpm/...` 之前优先读取的根 Markdown 入口面。在共享入口模型下，`AGENTS.md` 是唯一 canonical 受管文件，`CLAUDE.md`、`ANTIGRAVITY.md` 等其他 agent 根入口文件则作为 compatibility symlink 回指到 `AGENTS.md`。Bear.CTXPM 通过 `AGENTS.md` 中的 `ctxpm` 受管区块提供统一的资源读取说明，并通过 `ctxpm.yaml` 声明当前项目启用了哪些 agent profile，以及哪些根入口文件名应解析到这份 canonical 内容。
 
 ## 推荐目录结构
 
@@ -81,7 +81,9 @@ project/
       prompts/
       memories/
       mcp/
-  AGENTS.md / CLAUDE.md / 其他 agent 根入口文档
+  AGENTS.md
+  CLAUDE.md -> AGENTS.md
+  ANTIGRAVITY.md -> AGENTS.md
 ```
 
 其中：
@@ -89,7 +91,8 @@ project/
 - `ctxpm.yaml`：由用户和 AI 共同维护的项目清单。
 - `.ctxpm/dependencies/`：外部资源工作区，默认应加入 `.gitignore`。
 - `.ctxpm/packages/`：项目内资源目录，默认应进入版本控制。
-- 根入口 Markdown 文档：AI 进入项目后的第一入口。
+- `AGENTS.md`：canonical 的共享根入口文件。
+- 其他根入口文件名：当某个已声明 agent 需要特定文件名时，回指到 `AGENTS.md` 的 compatibility symlink。
 
 ## 设计原则
 
@@ -106,11 +109,11 @@ project/
 
 当 AI 接管一个 Bear.CTXPM 项目时，建议遵循以下流程：
 
-1. 读取根入口 Markdown 文档和 `ctxpm.yaml`。
+1. 先读取 `AGENTS.md` 和 `ctxpm.yaml`，再根据 `ctxpm.yaml` 中声明的 agent profile 映射继续执行。
 2. 优先扫描 `.ctxpm/packages/`，再扫描 `.ctxpm/dependencies/`。
 3. 结合 `ctxpm.yaml` 的显式声明和目录结构识别资源。
 4. 根据任务上下文判断需要查阅哪些资源，包括在任务依赖项目历史或既有决策时按需加载 `memory` 资源。
-5. 维护入口文档中的 `ctxpm` 受管区块，确保资源位置、读取优先级和冲突处理规则清晰稳定。
+5. 维护 `AGENTS.md` 中的 `ctxpm` 受管区块，并确保各 agent 的根入口 alias 始终与这份 canonical 文件同步。
 6. 在无法安全完成操作时，报告问题并给出整理建议。
 
 ## v0.1 非目标

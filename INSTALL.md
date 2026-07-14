@@ -16,7 +16,7 @@ Your task is to organize the current project into a project that can sustainably
 Your execution goals:
 
 1. Identify which agent the user is currently using.
-2. Create or update the root Markdown entrypoint file for that agent.
+2. Create or update the canonical shared root Markdown entrypoint file and any required agent-specific alias symlinks.
 3. Create and maintain `ctxpm.yaml`.
 4. Identify and migrate existing AI resources in the project.
 5. Move external AI resources into `.ctxpm/dependencies/`.
@@ -31,7 +31,7 @@ Your execution goals:
 
 Before performing any migration, ask the user which agent they primarily use.
 
-The goal of this question is not open-ended conversation, but to determine which root entrypoint file should be written.
+The goal of this question is not open-ended conversation, but to determine which agent profiles should be declared and which compatibility root filename aliases should be created.
 
 Prioritize the following profiles:
 
@@ -48,9 +48,9 @@ If the user does not clearly specify one:
    - `ANTIGRAVITY.md`
 2. If one of these files exists, prefer the corresponding profile.
 3. If none of the known entrypoint files exists, ask the user which agent they primarily use.
-4. If the user is still unsure, default to `generic` and write the entrypoint to `AGENTS.md`.
+4. If the user is still unsure, default to `generic`.
 
-The mapping between agents and default entrypoint files is:
+The mapping between agents and default root entrypoint filenames is:
 
 | Agent | Entrypoint |
 | --- | --- |
@@ -58,6 +58,8 @@ The mapping between agents and default entrypoint files is:
 | `claude-code` | `CLAUDE.md` |
 | `antigravity` | `ANTIGRAVITY.md` |
 | `generic` | `AGENTS.md` |
+
+In the shared-entrypoint model, `AGENTS.md` is always the canonical managed file. Agent-specific filenames such as `CLAUDE.md` and `ANTIGRAVITY.md` are compatibility symlinks that point back to `AGENTS.md` when those agent profiles are declared.
 
 ---
 
@@ -72,6 +74,8 @@ However, when the official companion `ctxpm` CLI is available, install or prepar
 
 - `ctxpm init`
 - `ctxpm install`
+- `ctxpm entrypoint sync`
+- `ctxpm entrypoint doctor`
 - `ctxpm detect`
 - `ctxpm migrate`
 - `ctxpm add`
@@ -170,7 +174,9 @@ project/
       prompts/
       memories/
       mcp/
-  AGENTS.md / CLAUDE.md / ANTIGRAVITY.md / other root entrypoint files
+  AGENTS.md
+  CLAUDE.md -> AGENTS.md
+  ANTIGRAVITY.md -> AGENTS.md
 ```
 
 Do not create the following as required artifacts for v0.1:
@@ -189,7 +195,7 @@ Follow these steps in order. Do not skip steps.
 
 1. Check for existing root entrypoint files.
 2. Ask the user which agent they currently use if necessary.
-3. Select the corresponding entrypoint filename.
+3. Select the corresponding agent profile and canonicalize the shared root entrypoint onto `AGENTS.md`.
 
 ### 5.2 Install or Prepare the Project-Local Companion `ctxpm` CLI
 
@@ -218,7 +224,8 @@ Recommended order:
 9. Treat the project-local `ctxpm init` result as the primary initialization action for deterministic setup work such as:
    - creating the canonical `.ctxpm/` directory skeleton
    - creating or updating `ctxpm.yaml`
-   - writing or repairing the managed root entrypoint block
+   - writing or repairing the managed shared root entrypoint block in `AGENTS.md`
+   - creating or repairing root entrypoint alias symlinks such as `CLAUDE.md -> AGENTS.md`
    - installing or refreshing the bundled `ctxpm` dependency and local CLI path
    - adding baseline `.gitignore` rules
    - migrating resources that can be resolved safely by the tool
@@ -445,6 +452,9 @@ entrypoints:
   codex:
     file: AGENTS.md
     mode: managed
+  claude-code:
+    file: AGENTS.md
+    mode: managed
 ```
 
 Complete `dependencies` and `packages` based on the actual scan results.
@@ -504,23 +514,29 @@ dependencies:
     version: sha256tree:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789
 ```
 
-### 5.8 Write the Root Markdown Entrypoint File
+### 5.8 Write the Shared Root Markdown Entrypoint File
 
-Write or update the managed `ctxpm` block in the entrypoint file for the selected agent.
+Write or update the managed `ctxpm` block in `AGENTS.md`, then create or repair any agent-specific root entrypoint aliases that should point back to it.
 
 The managed block must use the canonical template in
 [`resources/templates/ctxpm-managed-entrypoint.md`](resources/templates/ctxpm-managed-entrypoint.md).
 
 Template rules:
 
-1. Replace only `<agent-id>` with the `entrypoints` key for the current file, such as `codex` for `AGENTS.md` or `claude-code` for `CLAUDE.md`.
-2. Keep the body text identical across managed entrypoint files unless a future Bear.CTXPM specification revision changes the canonical template.
-3. Do not add agent-specific AI resource management rules inside the managed block. Put any extra agent-specific guidance outside the managed block.
+1. Do not inject agent-specific identifiers into the managed block body. Agent profile mappings belong in `ctxpm.yaml`, not inside `AGENTS.md`.
+2. Keep the body text identical across projects unless a future Bear.CTXPM specification revision changes the canonical template.
+3. Do not add agent-specific AI resource management rules inside the managed block. Put any extra project guidance outside the managed block.
 4. If any declared agent uses multiple compatibility paths for a resource type, keep the canonical body text unchanged and record the exact paths in `ctxpm.yaml`.
 
-If the entrypoint file does not exist, create it.  
-If the entrypoint file exists but has no managed block, insert one.  
-If the managed block already exists, update only the managed block and do not overwrite user content outside the block.
+Canonical file rules:
+
+1. If `AGENTS.md` does not exist, create it.
+2. If `AGENTS.md` exists but has no managed block, insert one.
+3. If the managed block already exists, update only the managed block and do not overwrite user content outside the block.
+4. If an old root entrypoint file such as `CLAUDE.md` exists as a real file and `AGENTS.md` does not yet exist, migrate that file into `AGENTS.md` before creating the alias symlink.
+5. After `AGENTS.md` is canonicalized, create symlinks for declared agent-specific root filenames such as `CLAUDE.md -> AGENTS.md` and `ANTIGRAVITY.md -> AGENTS.md`.
+6. If an alias path already exists as a real file with different non-managed content, stop and report the conflict instead of overwriting it silently.
+7. If multiple real root entrypoint files already exist at the same time, do not silently pick one. Report that AI should first merge any unique instructions from those files into `AGENTS.md`, then rerun `ctxpm entrypoint sync` to convert the remaining filenames into alias symlinks.
 
 ### 5.9 Install the Bundled External `ctxpm` Dependency
 
@@ -561,6 +577,15 @@ If it does not include the following rules, append them:
 
 Do not ignore `.ctxpm/packages/` by default because it is a project-local asset.
 
+Also ignore generated root entrypoint alias filenames that point back to `AGENTS.md`, such as:
+
+```gitignore
+CLAUDE.md
+ANTIGRAVITY.md
+```
+
+Do not ignore `AGENTS.md`, because it is the canonical managed root entrypoint file.
+
 For original AI resource paths that were replaced by compatibility symlinks or compatibility facades, choose the smallest safe `.gitignore` rule that covers the compatibility surface without hiding real project-owned files.
 
 Use this consolidation strategy:
@@ -583,22 +608,23 @@ Use this consolidation strategy:
 After installation, report:
 
 1. The currently identified agent.
-2. Which entrypoint file was written.
-3. Which `package` resources were created.
-4. Which `dependency` resources were created.
-5. Whether existing resources were migrated.
-6. Whether `.gitignore` was updated.
-7. Which ownership decisions were explicitly confirmed by the user.
-8. Which ownership decisions were established through explicit project evidence.
-9. Which resources remain unresolved and require user confirmation before migration.
-10. Whether the `ctxpm` dependency was created or updated.
-11. Whether compatibility symlinks for `ctxpm` were created in every confirmed agent's default skill discovery directories.
-12. Whether the managed entrypoint block now instructs future AI agents to use `ctxpm` rules for AI resource CRUD operations.
-13. Which external dependencies have hash-based versions recorded, and which still require source or entry-file confirmation.
-14. Whether `.ctxpm/dependencies/skills/ctxpm/ctxpm-yaml.md` was created or updated as the `ctxpm` skill companion document.
-15. Whether `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm` was installed or updated as the project-local companion CLI path.
-16. Whether the project-local `ctxpm init` command was run, and whether it completed successfully.
-17. Whether the post-init `ctxpm validate` check succeeded, and if not, which issues remained for manual follow-up.
+2. Whether `AGENTS.md` was written or repaired.
+3. Which root entrypoint alias symlinks were created or repaired.
+4. Which `package` resources were created.
+5. Which `dependency` resources were created.
+6. Whether existing resources were migrated.
+7. Whether `.gitignore` was updated.
+8. Which ownership decisions were explicitly confirmed by the user.
+9. Which ownership decisions were established through explicit project evidence.
+10. Which resources remain unresolved and require user confirmation before migration.
+11. Whether the `ctxpm` dependency was created or updated.
+12. Whether compatibility symlinks for `ctxpm` were created in every confirmed agent's default skill discovery directories.
+13. Whether the managed entrypoint block now instructs future AI agents to use `ctxpm` rules for AI resource CRUD operations.
+14. Which external dependencies have hash-based versions recorded, and which still require source or entry-file confirmation.
+15. Whether `.ctxpm/dependencies/skills/ctxpm/ctxpm-yaml.md` was created or updated as the `ctxpm` skill companion document.
+16. Whether `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm` was installed or updated as the project-local companion CLI path.
+17. Whether the project-local `ctxpm init` command was run, and whether it completed successfully.
+18. Whether the post-init `ctxpm validate` check succeeded, and if not, which issues remained for manual follow-up.
 
 ---
 
@@ -671,8 +697,8 @@ After completion, the project should at least satisfy:
 1. `ctxpm.yaml` exists.
 2. `.ctxpm/packages/` exists.
 3. `.ctxpm/dependencies/` exists.
-4. The root entrypoint file for the current agent exists.
-5. The entrypoint file contains a managed `ctxpm` block.
+4. `AGENTS.md` exists as the canonical shared root entrypoint file.
+5. `AGENTS.md` contains a managed `ctxpm` block.
 6. Existing AI resources have been organized as `package` or `dependency` as much as possible.
 7. `.gitignore` ignores both `.ctxpm/dependencies/` and `.ctxpm/state/`.
 8. `.ctxpm/dependencies/skills/ctxpm/SKILL.md` exists and is recorded in `ctxpm.yaml`.
@@ -681,11 +707,12 @@ After completion, the project should at least satisfy:
 11. When the project-local CLI was available, the project-local `ctxpm init` workflow has been executed instead of relying on purely manual AI bootstrapping for deterministic steps.
 12. Compatibility symlinks for managed resources exist in each confirmed agent's recognizable discovery directories for the corresponding resource types.
 13. The `ctxpm` dependency entry in `ctxpm.yaml` records both the canonical `.ctxpm/dependencies/...` path and every compatibility symlink path.
-14. The managed entrypoint block uses the canonical `ctxpm` template and instructs future AI agents to use `ctxpm` or the same `ctxpm` workflow before creating, reading, updating, or deleting AI resources.
-15. Future AI resources continue to be managed using the same `ctxpm` rules instead of agent default install locations.
-16. External dependencies installed from GitHub or direct URLs record hash-based `version` values in `ctxpm.yaml` for future update detection.
-17. The complete YAML format lives in `.ctxpm/dependencies/skills/ctxpm/ctxpm-yaml.md`.
-18. A post-init validation pass has been completed, or any remaining validation failures have been reported explicitly.
+14. Agent-specific root entrypoint aliases such as `CLAUDE.md` or `ANTIGRAVITY.md` point back to `AGENTS.md` when those agent profiles are declared.
+15. The managed entrypoint block uses the canonical `ctxpm` template and instructs future AI agents to use `ctxpm` or the same `ctxpm` workflow before creating, reading, updating, or deleting AI resources.
+16. Future AI resources continue to be managed using the same `ctxpm` rules instead of agent default install locations.
+17. External dependencies installed from GitHub or direct URLs record hash-based `version` values in `ctxpm.yaml` for future update detection.
+18. The complete YAML format lives in `.ctxpm/dependencies/skills/ctxpm/ctxpm-yaml.md`.
+19. A post-init validation pass has been completed, or any remaining validation failures have been reported explicitly.
 
 ---
 

@@ -294,8 +294,8 @@ func TestInitCreatesV2Manifest(t *testing.T) {
 	if ctxpm.Source == nil || ctxpm.Source.Path != "resources/skills/ctxpm" || ctxpm.Source.Entry != "SKILL.md" {
 		t.Fatalf("ctxpm source = %+v", ctxpm.Source)
 	}
-	if got := readFileForTest(t, filepath.Join(root, "AGENTS.md")); got != manifest.ManagedEntrypoint("generic") {
-		t.Fatalf("AGENTS.md mismatch\n--- got ---\n%s\n--- want ---\n%s", got, manifest.ManagedEntrypoint("generic"))
+	if got := readFileForTest(t, filepath.Join(root, "AGENTS.md")); got != manifest.ManagedEntrypoint() {
+		t.Fatalf("AGENTS.md mismatch\n--- got ---\n%s\n--- want ---\n%s", got, manifest.ManagedEntrypoint())
 	}
 	if got := readFileForTest(t, filepath.Join(root, ".ctxpm/dependencies/skills/ctxpm/SKILL.md")); got != readRepoFileForTest(t, "../../../resources/skills/ctxpm/SKILL.md") {
 		t.Fatalf("installed ctxpm skill mismatch with resources/skills/ctxpm/SKILL.md")
@@ -381,8 +381,34 @@ func TestInitDetectsExistingClaudeEntrypointWhenAgentOmitted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
-	if result.Agent != "claude-code" || result.EntrypointFile != "CLAUDE.md" {
+	if result.Agent != "claude-code" || result.EntrypointFile != "AGENTS.md" {
 		t.Fatalf("Init() result = %+v", result)
+	}
+	if got := readFileForTest(t, filepath.Join(root, "AGENTS.md")); got != "hello\n\n"+manifest.ManagedEntrypoint()+"\n" {
+		t.Fatalf("AGENTS.md mismatch\n--- got ---\n%s", got)
+	}
+	if target, err := os.Readlink(filepath.Join(root, "CLAUDE.md")); err != nil {
+		t.Fatalf("Readlink() error = %v", err)
+	} else if target != "AGENTS.md" {
+		t.Fatalf("CLAUDE.md symlink target = %q", target)
+	}
+}
+
+func TestInitGuidesMergeWhenMultipleLegacyEntrypointsExist(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"CLAUDE.md", "ANTIGRAVITY.md"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(name+"\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile(%s) error = %v", name, err)
+		}
+	}
+
+	app := New(root)
+	result, err := app.Init(InitOptions{})
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	if !containsIssue(result.Warnings, "merge any unique instructions into AGENTS.md") {
+		t.Fatalf("Init() warnings = %v", result.Warnings)
 	}
 }
 
@@ -410,7 +436,7 @@ func TestInitReplacesManagedBlockOnly(t *testing.T) {
 		t.Fatalf("Init() error = %v", err)
 	}
 	got := readFileForTest(t, entrypoint)
-	want := "Intro\n\n" + manifest.ManagedEntrypoint("generic") + "\n\nFooter\n"
+	want := "Intro\n\n" + manifest.ManagedEntrypoint() + "\n\nFooter\n"
 	if got != want {
 		t.Fatalf("entrypoint mismatch\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
@@ -449,7 +475,7 @@ func TestInitForceRepairsDamagedManagedBlock(t *testing.T) {
 		t.Fatalf("Init() error = %v", err)
 	}
 	got := readFileForTest(t, entrypoint)
-	want := "Intro\n\n" + manifest.ManagedEntrypoint("generic") + "\n"
+	want := "Intro\n\n" + manifest.ManagedEntrypoint() + "\n"
 	if got != want {
 		t.Fatalf("entrypoint mismatch\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
@@ -519,6 +545,9 @@ func TestInitForceSyncsAgentsAndCompatibility(t *testing.T) {
 	if _, ok := loaded.Entrypoints["claude-code"]; !ok {
 		t.Fatalf("entrypoints = %+v", loaded.Entrypoints)
 	}
+	if loaded.Entrypoints["claude-code"].File != "AGENTS.md" {
+		t.Fatalf("claude entrypoint = %+v", loaded.Entrypoints["claude-code"])
+	}
 	ctxpm := loaded.Dependencies[0]
 	if !hasString(ctxpm.Compatibility, ".agents/skills/ctxpm") || !hasString(ctxpm.Compatibility, ".claude/skills/ctxpm") {
 		t.Fatalf("compatibility = %v", ctxpm.Compatibility)
@@ -527,6 +556,11 @@ func TestInitForceSyncsAgentsAndCompatibility(t *testing.T) {
 		if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(relative))); err != nil {
 			t.Fatalf("expected %s to exist: %v", relative, err)
 		}
+	}
+	if target, err := os.Readlink(filepath.Join(root, "CLAUDE.md")); err != nil {
+		t.Fatalf("Readlink() error = %v", err)
+	} else if target != "AGENTS.md" {
+		t.Fatalf("CLAUDE.md symlink target = %q", target)
 	}
 }
 
@@ -691,7 +725,7 @@ func TestValidateReportsMissingPackageCompatibility(t *testing.T) {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
 	writeManifestForTest(t, root, &manifest.Manifest{
-		Version:      manifest.CurrentManifestVersion,
+		Version: manifest.CurrentManifestVersion,
 		Project: manifest.Project{Name: "sample"},
 		Agents:  []string{"generic"},
 		Packages: []manifest.Resource{
@@ -714,6 +748,101 @@ func TestValidateReportsMissingPackageCompatibility(t *testing.T) {
 	}
 	if !containsIssue(result.Issues, `compatibility path ".agents/skills/ctxpm-release" is missing`) {
 		t.Fatalf("Validate() issues = %v", result.Issues)
+	}
+}
+
+func TestValidateReportsMissingEntrypointAlias(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte(manifest.ManagedEntrypoint()), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version:      manifest.CurrentManifestVersion,
+		Project:      manifest.Project{Name: "sample"},
+		Agents:       []string{"claude-code"},
+		Dependencies: []manifest.Resource{},
+		Packages:     []manifest.Resource{},
+		Entrypoints: map[string]manifest.Entrypoint{
+			"claude-code": {File: "AGENTS.md", Mode: "managed"},
+		},
+	})
+
+	app := New(root)
+	result, err := app.Validate()
+	if err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	if result.OK {
+		t.Fatalf("Validate() OK = true, want false")
+	}
+	if !containsIssue(result.Issues, `entrypoint alias "CLAUDE.md" is missing`) {
+		t.Fatalf("Validate() issues = %v", result.Issues)
+	}
+}
+
+func TestEntrypointSyncCreatesSharedAliases(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "CLAUDE.md"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version:      manifest.CurrentManifestVersion,
+		Project:      manifest.Project{Name: "sample"},
+		Agents:       []string{"claude-code"},
+		Dependencies: []manifest.Resource{},
+		Packages:     []manifest.Resource{},
+		Entrypoints: map[string]manifest.Entrypoint{
+			"claude-code": {File: "CLAUDE.md", Mode: "managed"},
+		},
+	})
+
+	app := New(root)
+	result, err := app.EntrypointSync()
+	if err != nil {
+		t.Fatalf("EntrypointSync() error = %v", err)
+	}
+	if result.Status != "applied" {
+		t.Fatalf("EntrypointSync() status = %q", result.Status)
+	}
+	if got := readFileForTest(t, filepath.Join(root, "AGENTS.md")); got != "hello\n\n"+manifest.ManagedEntrypoint()+"\n" {
+		t.Fatalf("AGENTS.md mismatch\n--- got ---\n%s", got)
+	}
+	if target, err := os.Readlink(filepath.Join(root, "CLAUDE.md")); err != nil {
+		t.Fatalf("Readlink() error = %v", err)
+	} else if target != "AGENTS.md" {
+		t.Fatalf("CLAUDE.md symlink target = %q", target)
+	}
+}
+
+func TestEntrypointDoctorGuidesMergeForRealAliasFile(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte(manifest.ManagedEntrypoint()), 0o644); err != nil {
+		t.Fatalf("WriteFile(AGENTS.md) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "CLAUDE.md"), []byte("custom\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(CLAUDE.md) error = %v", err)
+	}
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version:      manifest.CurrentManifestVersion,
+		Project:      manifest.Project{Name: "sample"},
+		Agents:       []string{"claude-code"},
+		Dependencies: []manifest.Resource{},
+		Packages:     []manifest.Resource{},
+		Entrypoints: map[string]manifest.Entrypoint{
+			"claude-code": {File: "AGENTS.md", Mode: "managed"},
+		},
+	})
+
+	app := New(root)
+	result, err := app.EntrypointDoctor()
+	if err != nil {
+		t.Fatalf("EntrypointDoctor() error = %v", err)
+	}
+	if result.OK {
+		t.Fatalf("EntrypointDoctor() OK = true, want false")
+	}
+	if !containsIssue(result.Issues, "merge any unique instructions into AGENTS.md") {
+		t.Fatalf("EntrypointDoctor() issues = %v", result.Issues)
 	}
 }
 
@@ -1042,7 +1171,7 @@ func TestUpdateRefreshesManagedEntrypointBlocks(t *testing.T) {
 	}
 
 	got := readFileForTest(t, entrypoint)
-	want := "Intro\n\n" + manifest.ManagedEntrypoint("generic") + "\n\nFooter\n"
+	want := "Intro\n\n" + manifest.ManagedEntrypoint() + "\n\nFooter\n"
 	if got != want {
 		t.Fatalf("entrypoint mismatch\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
@@ -1061,15 +1190,14 @@ func TestUpdateRefreshesAllManagedEntrypoints(t *testing.T) {
 	defer server.Close()
 
 	for _, item := range []struct {
-		file  string
-		agent string
-		body  string
+		file string
+		body string
 	}{
-		{file: "AGENTS.md", agent: "generic", body: "generic instructions"},
-		{file: "CLAUDE.md", agent: "claude-code", body: "claude instructions"},
+		{file: "AGENTS.md", body: "shared instructions"},
+		{file: "CLAUDE.md", body: "shared instructions"},
 	} {
 		path := filepath.Join(root, item.file)
-		original := "Intro\n\n<!-- ctxpm:begin agent=" + item.agent + " -->\n" + item.body + "\n<!-- ctxpm:end -->\n\nFooter\n"
+		original := "Intro\n\n<!-- ctxpm:begin -->\n" + item.body + "\n<!-- ctxpm:end -->\n\nFooter\n"
 		if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
 			t.Fatalf("WriteFile(%s) error = %v", item.file, err)
 		}
@@ -1097,7 +1225,7 @@ func TestUpdateRefreshesAllManagedEntrypoints(t *testing.T) {
 		Packages: []manifest.Resource{},
 		Entrypoints: map[string]manifest.Entrypoint{
 			"generic":     {File: "AGENTS.md", Mode: "managed"},
-			"claude-code": {File: "CLAUDE.md", Mode: "managed"},
+			"claude-code": {File: "AGENTS.md", Mode: "managed"},
 		},
 	})
 
@@ -1106,18 +1234,15 @@ func TestUpdateRefreshesAllManagedEntrypoints(t *testing.T) {
 		t.Fatalf("Update() error = %v", err)
 	}
 
-	for _, item := range []struct {
-		file  string
-		agent string
-	}{
-		{file: "AGENTS.md", agent: "generic"},
-		{file: "CLAUDE.md", agent: "claude-code"},
-	} {
-		got := readFileForTest(t, filepath.Join(root, item.file))
-		want := "Intro\n\n" + manifest.ManagedEntrypoint(item.agent) + "\n\nFooter\n"
-		if got != want {
-			t.Fatalf("%s mismatch\n--- got ---\n%s\n--- want ---\n%s", item.file, got, want)
-		}
+	got := readFileForTest(t, filepath.Join(root, "AGENTS.md"))
+	want := "Intro\n\n" + manifest.ManagedEntrypoint() + "\n\nFooter\n"
+	if got != want {
+		t.Fatalf("AGENTS.md mismatch\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+	if target, err := os.Readlink(filepath.Join(root, "CLAUDE.md")); err != nil {
+		t.Fatalf("Readlink() error = %v", err)
+	} else if target != "AGENTS.md" {
+		t.Fatalf("CLAUDE.md symlink target = %q", target)
 	}
 }
 
@@ -1195,7 +1320,7 @@ func TestUpdateRunsInstallAfterManifestRefresh(t *testing.T) {
 		t.Fatalf("Update() error = %v", err)
 	}
 
-	if got := readFileForTest(t, entrypoint); got != "Intro\n\n"+manifest.ManagedEntrypoint("generic")+"\n\nFooter\n" {
+	if got := readFileForTest(t, entrypoint); got != "Intro\n\n"+manifest.ManagedEntrypoint()+"\n\nFooter\n" {
 		t.Fatalf("entrypoint mismatch\n--- got ---\n%s", got)
 	}
 	if target, err := os.Readlink(filepath.Join(root, ".agents", "rules", "project-review.md")); err != nil {
