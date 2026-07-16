@@ -116,8 +116,6 @@ Rules:
 - `url`
 - `archive`
 
-Legacy `source.type: github` may be treated as `git` during transition, but new manifests should write `git`.
-
 ### Git Source
 
 Use Git for single-file or directory resources stored in a repository.
