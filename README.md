@@ -57,7 +57,7 @@ A resource type describes the shape of the content. Standard resource types in B
 
 ### entrypoint
 
-An `entrypoint` is a Markdown entry file in the project root for agents to read, such as `AGENTS.md` or `CLAUDE.md`. Bear.CTXPM uses the managed `ctxpm` block in entrypoint documents to provide consistent resource reading instructions for different agents. Managed blocks should use the canonical template from `INSTALL.md`, with only the entrypoint agent identifier changing between files. By default, managed resources are also exposed through compatibility symlinks in every declared agent's recognizable discovery directories for the corresponding resource type, while canonical content stays under `.ctxpm/...`.
+An `entrypoint` is a root Markdown entry surface that agents read before scanning `.ctxpm/...`. In the shared-entrypoint model, `AGENTS.md` is the canonical managed file, while other agent-specific root files such as `CLAUDE.md` or `ANTIGRAVITY.md` are compatibility symlinks that point back to `AGENTS.md`. Bear.CTXPM uses the managed `ctxpm` block in `AGENTS.md` to provide one shared set of resource-reading instructions, and uses `ctxpm.yaml` to declare which agent profiles are enabled and which compatibility root filenames should resolve to that canonical file.
 
 ## Recommended Directory Structure
 
@@ -81,7 +81,9 @@ project/
       prompts/
       memories/
       mcp/
-  AGENTS.md / CLAUDE.md / other agent root entrypoint documents
+  AGENTS.md
+  CLAUDE.md -> AGENTS.md
+  ANTIGRAVITY.md -> AGENTS.md
 ```
 
 Where:
@@ -89,7 +91,8 @@ Where:
 - `ctxpm.yaml`: a project manifest maintained jointly by users and AI.
 - `.ctxpm/dependencies/`: the workspace for external resources, which should be ignored by default in `.gitignore`.
 - `.ctxpm/packages/`: the directory for project-local resources, which should be committed to version control by default.
-- Root Markdown entrypoint documents: the first entrypoint for AI after entering the project.
+- `AGENTS.md`: the canonical shared root entrypoint file.
+- Other root entrypoint filenames: compatibility symlinks back to `AGENTS.md` when a declared agent expects them.
 
 ## Design Principles
 
@@ -106,11 +109,11 @@ Where:
 
 When an AI takes over a Bear.CTXPM project, it is recommended to follow this workflow:
 
-1. Read the root Markdown entrypoint documents and `ctxpm.yaml`.
+1. Read `AGENTS.md` and `ctxpm.yaml`, then follow any agent profile mappings declared in `ctxpm.yaml`.
 2. Scan `.ctxpm/packages/` first, then `.ctxpm/dependencies/`.
 3. Identify resources by combining explicit declarations in `ctxpm.yaml` with the directory structure.
 4. Decide which resources to read based on the task context, including loading `memory` resources on demand when a task depends on project history or prior decisions.
-5. Maintain the managed `ctxpm` block in entrypoint documents so resource locations, reading priority, and conflict handling rules remain clear and stable.
+5. Maintain the managed `ctxpm` block in `AGENTS.md` and keep any agent-specific root entrypoint aliases synced to that canonical file.
 6. When an operation cannot be completed safely, report the issue and provide organization suggestions.
 
 ## Non-goals in v0.1

@@ -82,6 +82,8 @@ func run(args []string) error {
 		return runValidate(app, args[1:])
 	case "install":
 		return runInstall(app, args[1:])
+	case "entrypoint":
+		return runEntrypoint(app, args[1:])
 	case "detect":
 		return runDetect(app, args[1:])
 	case "migrate":
@@ -233,6 +235,40 @@ func runInstall(app *engine.App, args []string) error {
 		return err
 	}
 	return printMaybeJSON(result, *jsonOutput)
+}
+
+func runEntrypoint(app *engine.App, args []string) error {
+	if len(args) == 0 {
+		return failf(2, "usage: ctxpm entrypoint <sync|doctor> [options]")
+	}
+	switch args[0] {
+	case "sync":
+		fs := flag.NewFlagSet("entrypoint sync", flag.ContinueOnError)
+		fs.SetOutput(os.Stderr)
+		jsonOutput := fs.Bool("json", false, "Emit JSON output")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		result, err := app.EntrypointSync()
+		if err != nil {
+			return err
+		}
+		return printMaybeJSON(result, *jsonOutput)
+	case "doctor":
+		fs := flag.NewFlagSet("entrypoint doctor", flag.ContinueOnError)
+		fs.SetOutput(os.Stderr)
+		jsonOutput := fs.Bool("json", false, "Emit JSON output")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		result, err := app.EntrypointDoctor()
+		if err != nil {
+			return err
+		}
+		return printMaybeJSON(result, *jsonOutput)
+	default:
+		return failf(2, "unknown entrypoint command %q", args[0])
+	}
 }
 
 func runDetect(app *engine.App, args []string) error {
@@ -480,6 +516,7 @@ func printHelp(w *os.File) {
 		"  version        Print CLI version information",
 		"  init           Initialize the current project as a Bear.CTXPM project",
 		"  add            Add and install an external AI resource from a URL",
+		"  entrypoint     Sync or diagnose shared root entrypoint files",
 		"  detect         Detect unmanaged AI resources that may need migration",
 		"  migrate        Migrate detected AI resources into ctxpm-managed roots",
 		"  install        Install dependencies and repair compatibility links",
@@ -495,6 +532,7 @@ func printHelp(w *os.File) {
 		"  ctxpm init --agent codex",
 		"  ctxpm add https://github.com/example/ai/tree/main/skills/reviewer --type skill",
 		"  ctxpm add https://gitlab.company.com/team/ai-resources.git --type rule --source-path rules/security",
+		"  ctxpm entrypoint sync",
 		"  ctxpm memory search --query billing",
 		"  ctxpm install",
 		"  ctxpm update --all",

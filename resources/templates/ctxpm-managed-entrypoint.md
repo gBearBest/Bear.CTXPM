@@ -1,7 +1,9 @@
-<!-- ctxpm:begin agent=<agent-id> -->
+<!-- ctxpm:begin -->
 This project uses `ctxpm` to manage AI resources.
 For detailed create/install/detect/migrate/update/remove/validate work, first use the bundled `ctxpm` skill installed by initialization at `.ctxpm/dependencies/skills/ctxpm/SKILL.md`.
 The following AI resource types must still be managed through `ctxpm` so they are not skipped: `rules`, `skills`, `specs`, `prompts`, `mcp`, `memories`.
+
+Agent profiles, shared root entrypoint mappings, and any compatibility entrypoint aliases are declared in `ctxpm.yaml`. Treat this file as the canonical shared entrypoint content when the project maps multiple agents onto the same root entrypoint.
 
 During normal AI work, run `ctxpm detect` more often than `ctxpm check-updates`. If it finds AI resources installed outside ctxpm-managed roots, ask the user whether to migrate them, then run `ctxpm migrate` and `ctxpm validate` to verify the result.
 
