@@ -82,6 +82,8 @@ For multi-file URL or archive resources, compute the version from the full direc
 When the companion CLI is available, prefer it for routine lifecycle operations:
 
 - `ctxpm install`
+- `ctxpm entrypoint sync`
+- `ctxpm entrypoint doctor`
 - `ctxpm detect`
 - `ctxpm migrate`
 - `ctxpm add`
@@ -142,7 +144,12 @@ entrypoints:
   codex:
     file: AGENTS.md
     mode: managed
+  claude-code:
+    file: AGENTS.md
+    mode: managed
 ```
+
+Use `AGENTS.md` as the canonical shared root entrypoint file. When a declared agent expects a different root filename such as `CLAUDE.md` or `ANTIGRAVITY.md`, treat that filename as a compatibility symlink back to `AGENTS.md` and keep it out of Git with `.gitignore`.
 
 ## Lifecycle Rules
 
@@ -154,6 +161,7 @@ entrypoints:
 4. For dependencies, record `source` and `version`.
 5. Repair compatibility exposure paths.
 6. Ensure `.gitignore` includes safe ignore rules for repaired compatibility paths.
+7. Keep the shared root entrypoint topology healthy with `ctxpm entrypoint sync` and inspect drift with `ctxpm entrypoint doctor`.
 
 ### Validate
 
@@ -162,6 +170,7 @@ entrypoints:
 3. Check that the declared `entry` exists inside the root.
 4. Check that compatibility links exist.
 5. For `memory` directory resources, validate any `index.json` or `index.jsonl` references that point to other files inside the resource root.
+6. Check that `AGENTS.md` exists as the shared managed root entrypoint, and that other declared root entrypoint filenames are symlinks back to it.
 
 ### Update
 

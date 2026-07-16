@@ -83,10 +83,15 @@ func detectInitAgent(root string, requested string, m *manifest.Manifest) initDi
 		}
 	}
 	if len(existing) > 1 {
+		files := make([]string, 0, len(existing))
+		for _, file := range existing {
+			files = append(files, file)
+		}
+		sort.Strings(files)
 		return initDiscovery{
 			agent:            "generic",
-			warnings:         []string{"multiple existing root entrypoints were found; defaulted to generic/AGENTS.md"},
-			evidence:         []string{"detected multiple existing root entrypoints"},
+			warnings:         []string{fmt.Sprintf("multiple existing root entrypoints were found (%s); merge any unique instructions into %s, then rerun `ctxpm entrypoint sync` so the other root entrypoint filenames can be converted into compatibility symlinks", strings.Join(files, ", "), manifest.CanonicalEntrypointFile())},
+			evidence:         []string{fmt.Sprintf("detected multiple existing root entrypoints: %s", strings.Join(files, ", "))},
 			entrypointSource: "ambiguous-root-entrypoints",
 		}
 	}

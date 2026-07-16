@@ -57,7 +57,7 @@ resource type は、コンテンツの形態を表します。Bear.CTXPM v0.1 �
 
 ### entrypoint
 
-`entrypoint` は、agent が読むためにプロジェクトルートに置かれる Markdown エントリーファイルです。例として `AGENTS.md` や `CLAUDE.md` があります。Bear.CTXPM は、エントリーポイント文書内の `ctxpm` 管理ブロックを通じて、異なる agent に一貫したリソース読み取り手順を提供します。管理ブロックは `INSTALL.md` で定義された canonical template を使用し、ファイルごとに変えてよいのは対応する agent 識別子だけです。デフォルトでは、管理対象リソースは対応する resource type について、宣言済みの各 agent が認識できる discovery directory に compatibility symlink としても公開し、canonical な内容は `.ctxpm/...` 配下に維持します。
+`entrypoint` は、agent が `.ctxpm/...` を読む前に最初に確認するルート Markdown エントリー面です。共有エントリーポイントモデルでは、`AGENTS.md` が唯一の canonical managed file になり、`CLAUDE.md` や `ANTIGRAVITY.md` などの agent ごとのルートファイル名は `AGENTS.md` を指す compatibility symlink として扱います。Bear.CTXPM は `AGENTS.md` 内の `ctxpm` 管理ブロックで共通のリソース読み取り手順を提供し、`ctxpm.yaml` で有効な agent profile と canonical ファイルへ解決すべき互換ルート名を宣言します。
 
 ## 推奨ディレクトリ構造
 
@@ -81,7 +81,9 @@ project/
       prompts/
       memories/
       mcp/
-  AGENTS.md / CLAUDE.md / その他の agent ルートエントリーポイント文書
+  AGENTS.md
+  CLAUDE.md -> AGENTS.md
+  ANTIGRAVITY.md -> AGENTS.md
 ```
 
 各要素の意味は次のとおりです。
@@ -89,7 +91,8 @@ project/
 - `ctxpm.yaml`: ユーザーと AI が共同で保守するプロジェクトマニフェスト。
 - `.ctxpm/dependencies/`: 外部リソースのワークスペース。デフォルトでは `.gitignore` に追加するべきです。
 - `.ctxpm/packages/`: プロジェクト内リソースのディレクトリ。デフォルトではバージョン管理に含めるべきです。
-- ルート Markdown エントリーポイント文書: AI がプロジェクトに入った後の最初の入口。
+- `AGENTS.md`: canonical な共有ルートエントリーポイントファイル。
+- その他のルートエントリーポイント名: 宣言済み agent が特定のファイル名を期待する場合に `AGENTS.md` へ戻る compatibility symlink。
 
 ## 設計原則
 
@@ -106,11 +109,11 @@ project/
 
 AI が Bear.CTXPM プロジェクトを引き継ぐときは、次の流れに従うことを推奨します。
 
-1. ルート Markdown エントリーポイント文書と `ctxpm.yaml` を読む。
+1. まず `AGENTS.md` と `ctxpm.yaml` を読み、その後 `ctxpm.yaml` に記録された agent profile の対応関係に従う。
 2. まず `.ctxpm/packages/` をスキャンし、その後 `.ctxpm/dependencies/` をスキャンする。
 3. `ctxpm.yaml` の明示的な宣言とディレクトリ構造を組み合わせてリソースを識別する。
 4. タスクのコンテキストに応じて、読む必要があるリソースを判断する。プロジェクトの履歴や過去の判断に依存するタスクでは、`memory` リソースも必要に応じて読み込む。
-5. エントリーポイント文書内の `ctxpm` 管理ブロックを保守し、リソース位置、読み取り優先順位、競合処理ルールを明確かつ安定させる。
+5. `AGENTS.md` 内の `ctxpm` 管理ブロックを保守し、agent ごとのルートエントリーポイント alias をその canonical ファイルへ同期し続ける。
 6. 安全に操作を完了できない場合は、問題を報告し、整理案を提示する。
 
 ## v0.1 の非目標
