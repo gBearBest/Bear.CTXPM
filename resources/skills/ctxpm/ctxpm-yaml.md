@@ -98,7 +98,7 @@ Every `dependencies` or `packages` item uses the same root-level shape:
 | `entry` | Yes | Entry file relative to the canonical root. |
 | `compatibility` | No | Compatibility exposure paths outside `.ctxpm`. |
 | `source` | Dependencies only | Upstream source metadata. |
-| `version` | Dependencies only | Installed dependency version. |
+| `version` | Dependencies only | Installed dependency version metadata for the resolved resource root. |
 
 Rules:
 
@@ -142,7 +142,8 @@ Rules:
 
 - `source.path` is the upstream resource root inside the repository.
 - `source.entry` is the upstream entry file relative to `source.path`.
-- `version` is the installed commit SHA for the resource root.
+- `version` is the most recent commit SHA at or before the installed checkout that changed the resolved `source.path`.
+- For Git dependencies, `version` is path-scoped to the resource root and may differ from the checkout `HEAD` commit when later commits did not modify that resource path.
 
 ### Single-File URL Source
 
@@ -225,7 +226,7 @@ Dependency versions must describe the resolved **resource root**, not just a sin
 
 | Source shape | Version format |
 | --- | --- |
-| Git file or directory root | Full commit SHA |
+| Git file or directory root | Full commit SHA of the latest commit that changed `source.path` |
 | Non-Git single-file root | `sha256:<hex>` |
 | Non-Git directory root | `sha256tree:<hex>` |
 
