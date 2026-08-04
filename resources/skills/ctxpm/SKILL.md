@@ -71,7 +71,7 @@ Rules:
 
 External dependency versions must describe the resolved resource root:
 
-- Git resources use the installed commit SHA.
+- Git resources use the full commit SHA of the latest commit that changed `source.path` at or before the installed checkout.
 - Single-file non-Git resources use `sha256:<hex>`.
 - Directory non-Git resources use `sha256tree:<hex>`.
 
