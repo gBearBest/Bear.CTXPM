@@ -599,6 +599,13 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 			}
 			actions = append(actions, InstallAction{Kind: "dependency", Name: dep.Name, Status: "linked", Version: dep.Version})
 			installedResources = append(installedResources, *dep)
+			if dep.Name == "ctxpm" {
+				cliPath := filepath.Join(a.Root, ".ctxpm/dependencies/skills/ctxpm/cli/ctxpm")
+				status, _ := prepareBundledCLI(ctx, cliPath, a.Root)
+				if status != "verified-existing" {
+					actions = append(actions, InstallAction{Kind: "tool", Name: "ctxpm local cli", Status: status})
+				}
+			}
 			continue
 		}
 		installed, err := a.installResource(ctx, dep, dep.Version)
@@ -612,6 +619,13 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 		}
 		actions = append(actions, InstallAction{Kind: "dependency", Name: dep.Name, Status: installed.Status, Version: dep.Version})
 		installedResources = append(installedResources, *dep)
+		if dep.Name == "ctxpm" {
+			cliPath := filepath.Join(a.Root, ".ctxpm/dependencies/skills/ctxpm/cli/ctxpm")
+			status, _ := prepareBundledCLI(ctx, cliPath, a.Root)
+			if status != "verified-existing" {
+				actions = append(actions, InstallAction{Kind: "tool", Name: "ctxpm local cli", Status: status})
+			}
+		}
 	}
 	for i := range m.Packages {
 		pkg := &m.Packages[i]

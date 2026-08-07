@@ -139,8 +139,9 @@ If a user or AI later wants to introduce a new skill, rule, spec, prompt, memory
 When installing or updating an external `dependency`, record a stable hash-based version in `ctxpm.yaml` whenever the source is known.
 
 - Versions describe the resolved **resource root**, not just a guessed single file.
-- If the resource is installed from Git, resolve the exact commit SHA that provided the resource root and record that full commit SHA as the dependency `version`.
-- Do not also duplicate that same Git commit SHA under `source.commit`; `version` is the authoritative installed revision.
+- If the resource is installed from Git, resolve the commit SHA of the most recent commit at or before the installed checkout that changed the resolved `source.path`, and record that full commit SHA as the dependency `version`.
+- This Git `version` is path-scoped metadata for the resolved resource root, not necessarily the checkout `HEAD` commit SHA.
+- Do not also duplicate that same Git commit SHA under `source.commit`; `version` is the authoritative recorded revision for the installed resource root.
 - If the resource root is a non-Git single file, compute `version: sha256:<hex>`.
 - If the resource root is a non-Git directory, compute `version: sha256tree:<hex>` from the full directory tree.
 - The entry file is the file the AI agent should read first inside the resource root, such as `SKILL.md`, `MEMORY.md`, a rule file, a prompt file, a spec entry file, or an MCP configuration file.
@@ -389,7 +390,7 @@ When a resource is an external asset:
 5. If the original resource path was tracked by Git, try to remove it from version control with `git rm --cached` after the canonical content has been moved under `.ctxpm/dependencies/`.
 6. If there is only a local copy and the remote source cannot be confirmed, record the current migrated location as the temporary local source.
 7. If the remote source is known, record `source` in `ctxpm.yaml`.
-8. If the remote source is a GitHub repository, record the exact source commit SHA as the dependency `version`.
+8. If the remote source is a GitHub repository, record the most recent commit SHA that changed the resolved `source.path` at or before the installed checkout as the dependency `version`.
 9. If the remote source is a direct URL, compute the SHA-256 hash of the AI resource entry file and record `version: sha256:<hex>`.
 10. External resources should not be committed to version control by default.
 
@@ -460,7 +461,7 @@ entrypoints:
 Complete `dependencies` and `packages` based on the actual scan results.
 
 For external dependencies with a known GitHub or URL source, include `source` and `version`.
-For Git dependencies, `source` locates the upstream resource root and `version` records the installed commit SHA.
+For Git dependencies, `source` locates the upstream resource root and `version` records the most recent commit SHA that changed that resource root at or before the installed checkout.
 
 Git dependency example:
 
