@@ -1125,6 +1125,56 @@ func TestInstallArchiveDependency(t *testing.T) {
 	}
 }
 
+func TestInstallPreparesBundledCtxpmLocalCLI(t *testing.T) {
+	root := t.TempDir()
+	ctxpmRoot := filepath.Join(root, ".ctxpm", "dependencies", "skills", "ctxpm")
+	if err := os.MkdirAll(ctxpmRoot, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(ctxpmRoot, "SKILL.md"), []byte("# ctxpm\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(ctxpmRoot, "ctxpm-yaml.md"), []byte("version: 1.0\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version: manifest.CurrentManifestVersion,
+		Project: manifest.Project{Name: "sample"},
+		Agents:  []string{"generic"},
+		Dependencies: []manifest.Resource{
+			{
+				Name:          "ctxpm",
+				Type:          "skill",
+				Layout:        manifest.LayoutDir,
+				Path:          ".ctxpm/dependencies/skills/ctxpm",
+				Entry:         "SKILL.md",
+				Compatibility: []string{".agents/skills/ctxpm"},
+			},
+		},
+		Packages: []manifest.Resource{},
+	})
+
+	app := New(root)
+	result, err := app.Install(context.Background(), InstallOptions{Only: "ctxpm"})
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if len(result.Actions) != 2 {
+		t.Fatalf("Install() actions = %d, want 2", len(result.Actions))
+	}
+	if result.Actions[1].Kind != "tool" || result.Actions[1].Name != "ctxpm local cli" {
+		t.Fatalf("Install() cli action = %+v", result.Actions[1])
+	}
+	cliPath := filepath.Join(ctxpmRoot, "cli", "ctxpm")
+	info, err := os.Stat(cliPath)
+	if err != nil {
+		t.Fatalf("missing local CLI: %v", err)
+	}
+	if info.Mode()&0o111 == 0 {
+		t.Fatalf("local CLI is not executable: %v", info.Mode())
+	}
+}
+
 func TestUpdateRefreshesManagedEntrypointBlocks(t *testing.T) {
 	root := t.TempDir()
 	server := newSingleFileUpdateServer(t, "/reviewer.md", "# reviewer\n")

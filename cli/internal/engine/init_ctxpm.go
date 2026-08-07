@@ -16,6 +16,8 @@ import (
 	"github.com/gBearBest/Bear.CTXPM/cli/internal/manifest"
 )
 
+const bundledCLIInstallScriptURL = "https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/latest/cli/install.sh"
+
 type managedEntrypointState struct {
 	HasManagedBlock bool
 	Damaged         bool
@@ -169,7 +171,7 @@ func ensureBundledCtxpm(root string, agents []string) (*bundledCtxpmResult, erro
 		result.Warnings = append(result.Warnings, fmt.Sprintf("could not prepare local CLI directory: %v", err))
 	} else {
 		created = append(created, filepath.Dir(cliPath))
-		status, warnings := prepareBundledCLI(cliPath)
+		status, warnings := prepareBundledCLI(context.Background(), cliPath, root)
 		result.LocalCLIStatus = status
 		result.Warnings = append(result.Warnings, warnings...)
 		if _, err := os.Stat(cliPath); err == nil {
@@ -222,7 +224,7 @@ func currentBuildRevision() string {
 	return ""
 }
 
-func prepareBundledCLI(targetPath string) (string, []string) {
+func prepareBundledCLI(ctx context.Context, targetPath, projectRoot string) (string, []string) {
 	warnings := []string{}
 	if err := verifyBundledCLI(targetPath); err == nil {
 		return "verified-existing", nil
@@ -236,6 +238,9 @@ func prepareBundledCLI(targetPath string) (string, []string) {
 		sources = append(sources, lookup)
 	}
 	for _, source := range dedupe(sources) {
+		if samePath(source, targetPath) {
+			continue
+		}
 		info, err := os.Stat(source)
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("could not inspect CLI source %s: %v", source, err))
@@ -251,11 +256,46 @@ func prepareBundledCLI(targetPath string) (string, []string) {
 		}
 		return "installed-and-verified", warnings
 	}
+	if err := installBundledCLIRemotely(ctx, projectRoot); err == nil {
+		if err := verifyBundledCLI(targetPath); err == nil {
+			return "remote-installed-and-verified", warnings
+		}
+		warnings = append(warnings, fmt.Sprintf("remote installer completed but verification failed for %s", targetPath))
+	} else {
+		warnings = append(warnings, err.Error())
+	}
 	if err := verifyBundledCLI(targetPath); err == nil {
 		return "verified-existing", warnings
 	}
 	warnings = append(warnings, "companion CLI could not be prepared automatically; ctxpm skill remains available for manual workflow")
 	return "unavailable", warnings
+}
+
+func installBundledCLIRemotely(ctx context.Context, projectRoot string) error {
+	remoteCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(remoteCtx, "sh", "-c", `curl -fsSL `+bundledCLIInstallScriptURL+` | sh -s -- --scope project --project-root "$1"`, "ctxpm-install", projectRoot)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		trimmed := strings.TrimSpace(string(output))
+		if trimmed != "" {
+			return fmt.Errorf("remote installer failed: %w: %s", err, trimmed)
+		}
+		return fmt.Errorf("remote installer failed: %w", err)
+	}
+	return nil
+}
+
+func samePath(left, right string) bool {
+	if left == right {
+		return true
+	}
+	absLeft, errLeft := filepath.Abs(left)
+	absRight, errRight := filepath.Abs(right)
+	if errLeft == nil && errRight == nil && absLeft == absRight {
+		return true
+	}
+	return false
 }
 
 func verifyBundledCLI(path string) error {
