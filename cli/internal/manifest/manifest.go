@@ -464,6 +464,54 @@ func pathIsFileLike(value string) bool {
 	return strings.Contains(base, ".")
 }
 
+// agentCompatibilityPrefix returns the discovery directory prefix for a given agent profile.
+// Returns an empty string for unrecognized agents.
+func agentCompatibilityPrefix(agent string) string {
+	switch agent {
+	case "codex", "generic":
+		return ".agents"
+	case "claude-code":
+		return ".claude"
+	case "antigravity":
+		return ".antigravity"
+	default:
+		return ""
+	}
+}
+
+// DerivedCompatibilityPaths computes the default compatibility paths for r
+// given the set of declared agents, using the agent→prefix and type→subdir
+// mappings defined in the ctxpm spec.
+func DerivedCompatibilityPaths(agents []string, r Resource) []string {
+	dir := TypeDir(r.Type)
+	leaf := filepath.Base(filepath.FromSlash(r.Path))
+	seen := map[string]bool{}
+	paths := []string{}
+	for _, agent := range agents {
+		prefix := agentCompatibilityPrefix(agent)
+		if prefix == "" {
+			continue
+		}
+		p := filepath.ToSlash(filepath.Join(prefix, dir, leaf))
+		if !seen[p] {
+			seen[p] = true
+			paths = append(paths, p)
+		}
+	}
+	return paths
+}
+
+// EffectiveCompatibility returns the resolved compatibility paths for r.
+// When Compatibility is nil (field was omitted), paths are derived from agents.
+// When Compatibility is an explicit non-nil slice (even empty), that value is
+// returned as-is, allowing callers to suppress all exposure with [].
+func (r Resource) EffectiveCompatibility(agents []string) []string {
+	if r.Compatibility != nil {
+		return r.Compatibility
+	}
+	return DerivedCompatibilityPaths(agents, r)
+}
+
 func TypeDir(resourceType string) string {
 	switch resourceType {
 	case "skill":

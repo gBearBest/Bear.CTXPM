@@ -19,24 +19,14 @@ dependencies:
       path: resources/skills/ctxpm
       entry: SKILL.md
     version: 1b194b5766c46bf6f1b39a76b446170a7e7c244e
-    compatibility:
-      - .agents/skills/ctxpm
 packages:
   - name: ctxpm-release
     type: skill
     layout: dir
     path: .ctxpm/packages/skills/ctxpm-release
     entry: SKILL.md
-    compatibility:
-      - .agents/skills/ctxpm-release
   - name: ctxpm-source-boundary
     type: rule
     layout: file
     path: .ctxpm/packages/rules/ctxpm-source-boundary.md
     entry: ctxpm-source-boundary.md
-    compatibility:
-      - .agents/rules/ctxpm-source-boundary.md
-entrypoints:
-  generic:
-    file: AGENTS.md
-    mode: managed
