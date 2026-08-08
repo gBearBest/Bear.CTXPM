@@ -179,10 +179,10 @@ func ensureBundledCtxpm(root string, agents []string) (*bundledCtxpmResult, erro
 		}
 	}
 
-	if err := ensureCompatibility(root, resource); err != nil {
+	if err := ensureCompatibility(root, agents, resource); err != nil {
 		return nil, err
 	}
-	for _, compat := range resource.Compatibility {
+	for _, compat := range resource.EffectiveCompatibility(agents) {
 		created = append(created, filepath.Join(root, filepath.FromSlash(compat)))
 	}
 	result.Files = dedupe(created)
@@ -193,7 +193,7 @@ func ensureBundledCtxpm(root string, agents []string) (*bundledCtxpmResult, erro
 }
 
 func bundledCtxpmResource(agents []string) manifest.Resource {
-	resource := manifest.Resource{
+	return manifest.Resource{
 		Name:   "ctxpm",
 		Type:   "skill",
 		Layout: manifest.LayoutDir,
@@ -207,8 +207,6 @@ func bundledCtxpmResource(agents []string) manifest.Resource {
 		},
 		Version: currentBuildRevision(),
 	}
-	resource.Compatibility = compatibilityPaths(agents, resource)
-	return resource
 }
 
 func currentBuildRevision() string {

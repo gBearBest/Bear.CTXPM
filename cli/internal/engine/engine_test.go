@@ -188,9 +188,6 @@ func TestInstallIndexesCanonicalPackageFromCtxpmDirectory(t *testing.T) {
 		if pkg.Path != ".ctxpm/packages/skills/ctxpm-release" {
 			t.Fatalf("package path = %q", pkg.Path)
 		}
-		if !hasString(pkg.Compatibility, ".agents/skills/ctxpm-release") {
-			t.Fatalf("package compatibility = %v", pkg.Compatibility)
-		}
 		break
 	}
 	if !found {
@@ -246,9 +243,6 @@ func TestInstallIndexesCanonicalDependencyFromCtxpmDirectory(t *testing.T) {
 		found = true
 		if dep.Path != ".ctxpm/dependencies/rules/shared-rule.md" {
 			t.Fatalf("dependency path = %q", dep.Path)
-		}
-		if !hasString(dep.Compatibility, ".agents/rules/shared-rule.md") {
-			t.Fatalf("dependency compatibility = %v", dep.Compatibility)
 		}
 		break
 	}
@@ -542,16 +536,6 @@ func TestInitForceSyncsAgentsAndCompatibility(t *testing.T) {
 	if !hasString(loaded.Agents, "generic") || !hasString(loaded.Agents, "claude-code") {
 		t.Fatalf("agents = %v", loaded.Agents)
 	}
-	if _, ok := loaded.Entrypoints["claude-code"]; !ok {
-		t.Fatalf("entrypoints = %+v", loaded.Entrypoints)
-	}
-	if loaded.Entrypoints["claude-code"].File != "AGENTS.md" {
-		t.Fatalf("claude entrypoint = %+v", loaded.Entrypoints["claude-code"])
-	}
-	ctxpm := loaded.Dependencies[0]
-	if !hasString(ctxpm.Compatibility, ".agents/skills/ctxpm") || !hasString(ctxpm.Compatibility, ".claude/skills/ctxpm") {
-		t.Fatalf("compatibility = %v", ctxpm.Compatibility)
-	}
 	for _, relative := range []string{".agents/skills/ctxpm", ".claude/skills/ctxpm", "AGENTS.md", "CLAUDE.md"} {
 		if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(relative))); err != nil {
 			t.Fatalf("expected %s to exist: %v", relative, err)
@@ -652,9 +636,6 @@ func TestInitRegistersExistingCanonicalPackageFromCtxpmDirectory(t *testing.T) {
 		if pkg.Path != ".ctxpm/packages/skills/ctxpm-release" {
 			t.Fatalf("package path = %q", pkg.Path)
 		}
-		if !hasString(pkg.Compatibility, ".agents/skills/ctxpm-release") {
-			t.Fatalf("package compatibility = %v", pkg.Compatibility)
-		}
 		break
 	}
 	if !found {
@@ -700,9 +681,6 @@ func TestInitRegistersExistingCanonicalDependencyFromCtxpmDirectory(t *testing.T
 		found = true
 		if dep.Path != ".ctxpm/dependencies/rules/shared-rule.md" {
 			t.Fatalf("dependency path = %q", dep.Path)
-		}
-		if !hasString(dep.Compatibility, ".agents/rules/shared-rule.md") {
-			t.Fatalf("dependency compatibility = %v", dep.Compatibility)
 		}
 		break
 	}

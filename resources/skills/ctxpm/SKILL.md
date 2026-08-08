@@ -27,15 +27,15 @@ Rules:
 
 ## Compatibility Exposure
 
-After installing the canonical root, immediately expose it through every confirmed agent's default skill discovery directory.
+After installing the canonical root, the tool exposes it through every confirmed agent's default skill discovery directory via compatibility symlinks. No explicit `compatibility` field is needed in `ctxpm.yaml` — paths are derived automatically from the declared `agents`.
 
-Example:
+Example derived link for a project with `agents: [generic]`:
 
 ```text
 .agents/skills/ctxpm -> ../../.ctxpm/dependencies/skills/ctxpm
 ```
 
-Apply the same compatibility rule to other managed resources: keep the canonical content under `.ctxpm/...`, then expose it through agent-recognizable discovery paths.
+The same derivation applies to all managed resources: canonical content stays under `.ctxpm/...` and is exposed through agent-recognizable discovery paths without writing the paths into `ctxpm.yaml`.
 
 ## `ctxpm.yaml` Registration
 
@@ -57,15 +57,12 @@ dependencies:
       entry: SKILL.md
       ref: main
     version: 0123456789abcdef0123456789abcdef01234567
-    compatibility:
-      - .agents/skills/ctxpm
 ```
 
 Rules:
 
 - Do not model the bundled `ctxpm` skill as a single-file URL dependency.
 - Register the full skill directory as the resource root.
-- Do not omit `compatibility` for `ctxpm`.
 
 ## Version Rules
 
@@ -128,8 +125,6 @@ dependencies:
       path: skills/external-resource
       entry: SKILL.md
     version: 0123456789abcdef0123456789abcdef01234567
-    compatibility:
-      - .agents/skills/external-resource
 
 packages:
   - name: project-resource
@@ -137,16 +132,6 @@ packages:
     layout: dir
     path: .ctxpm/packages/memories/project-resource
     entry: MEMORY.md
-    compatibility:
-      - .agents/memories/project-resource
-
-entrypoints:
-  codex:
-    file: AGENTS.md
-    mode: managed
-  claude-code:
-    file: AGENTS.md
-    mode: managed
 ```
 
 Use `AGENTS.md` as the canonical shared root entrypoint file. When a declared agent expects a different root filename such as `CLAUDE.md` or `ANTIGRAVITY.md`, treat that filename as a compatibility symlink back to `AGENTS.md` and keep it out of Git with `.gitignore`.
@@ -157,7 +142,7 @@ Use `AGENTS.md` as the canonical shared root entrypoint file. When a declared ag
 
 1. Classify the resource as `dependency` or `package`.
 2. Install the canonical resource root under `.ctxpm/dependencies/` or `.ctxpm/packages/`.
-3. Record `layout`, `path`, `entry`, and any required `compatibility` paths.
+3. Record `layout`, `path`, and `entry`. Omit `compatibility` unless the derived paths are wrong.
 4. For dependencies, record `source` and `version`.
 5. Repair compatibility exposure paths.
 6. Ensure `.gitignore` includes safe ignore rules for repaired compatibility paths.
