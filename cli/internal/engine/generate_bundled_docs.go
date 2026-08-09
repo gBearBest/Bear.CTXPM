@@ -18,6 +18,7 @@ func main() {
 
 	skillPath := filepath.Clean(filepath.Join(cwd, "../../../resources/skills/ctxpm/SKILL.md"))
 	yamlPath := filepath.Clean(filepath.Join(cwd, "../../../resources/skills/ctxpm/ctxpm-yaml.md"))
+	cliReadmePath := filepath.Clean(filepath.Join(cwd, "../../../resources/skills/ctxpm/cli/README.md"))
 	outputPath := filepath.Join(cwd, "zz_bundled_docs_generated.go")
 
 	skillContent, err := os.ReadFile(skillPath)
@@ -25,6 +26,10 @@ func main() {
 		fail(err)
 	}
 	yamlContent, err := os.ReadFile(yamlPath)
+	if err != nil {
+		fail(err)
+	}
+	cliReadmeContent, err := os.ReadFile(cliReadmePath)
 	if err != nil {
 		fail(err)
 	}
@@ -36,6 +41,8 @@ func main() {
 	source.WriteString(fmt.Sprintf("%q", string(skillContent)))
 	source.WriteString("\n\nconst bundledCtxpmYAMLContent = ")
 	source.WriteString(fmt.Sprintf("%q", string(yamlContent)))
+	source.WriteString("\n\nconst bundledCtxpmCLIReadmeContent = ")
+	source.WriteString(fmt.Sprintf("%q", string(cliReadmeContent)))
 	source.WriteString("\n")
 
 	formatted, err := format.Source(source.Bytes())
