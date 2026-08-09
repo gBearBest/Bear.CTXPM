@@ -94,6 +94,8 @@ When the companion CLI is available, prefer it for routine lifecycle operations:
 - `ctxpm memory capture`
 - `ctxpm memory prune`
 
+For the full command reference — flags, options, and usage guidance for each command — read [`cli/README.md`](cli/README.md).
+
 Run `ctxpm detect` on a shorter cadence than `ctxpm check-updates` so newly added AI resources in non-ctxpm locations are caught early, then migrate them and validate the result after user confirmation.
 
 If the CLI is unavailable, follow the same protocol manually instead of inventing a partial workflow.
