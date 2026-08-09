@@ -134,7 +134,7 @@ packages:
     entry: MEMORY.md
 ```
 
-Use `AGENTS.md` as the canonical shared root entrypoint file. When a declared agent expects a different root filename such as `CLAUDE.md` or `ANTIGRAVITY.md`, treat that filename as a compatibility symlink back to `AGENTS.md` and keep it out of Git with `.gitignore`.
+Use `.ctxpm/AGENTS.md` as the canonical managed entrypoint source file. All root-level agent entrypoint filenames (`AGENTS.md`, `CLAUDE.md`, `ANTIGRAVITY.md`, etc.) are symlinks pointing directly to `.ctxpm/AGENTS.md`. Keep all of these root-level symlinks out of Git with `.gitignore`.
 
 ## Lifecycle Rules
 
@@ -155,7 +155,7 @@ Use `AGENTS.md` as the canonical shared root entrypoint file. When a declared ag
 3. Check that the declared `entry` exists inside the root.
 4. Check that compatibility links exist.
 5. For `memory` directory resources, validate any `index.json` or `index.jsonl` references that point to other files inside the resource root.
-6. Check that `AGENTS.md` exists as the shared managed root entrypoint, and that other declared root entrypoint filenames are symlinks back to it.
+6. Check that `.ctxpm/AGENTS.md` exists as the managed entrypoint source, and that all root-level entrypoint filenames are symlinks pointing directly to it.
 
 ### Update
 

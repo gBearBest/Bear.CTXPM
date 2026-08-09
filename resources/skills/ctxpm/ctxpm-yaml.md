@@ -263,10 +263,10 @@ entrypoints:
 
 Rules:
 
-- `file` is the canonical root entrypoint Markdown file for that agent profile.
+- `file` is the canonical root entrypoint Markdown file name for that agent profile.
 - `mode` defaults to `managed` when omitted. Only write `mode` when overriding to a non-default value.
-- In the shared-entrypoint model, multiple agent profiles can point at the same canonical `AGENTS.md`.
-- Agent-specific root filenames such as `CLAUDE.md` or `ANTIGRAVITY.md` are compatibility symlinks inferred from the declared agent profiles and should point back to `AGENTS.md`.
+- In the shared-entrypoint model, multiple agent profiles can point at the same canonical `AGENTS.md` name.
+- The actual managed content lives at `.ctxpm/AGENTS.md`. All root-level entrypoint filenames (`AGENTS.md`, `CLAUDE.md`, `ANTIGRAVITY.md`, etc.) are symlinks pointing directly to `.ctxpm/AGENTS.md`.
 
 ## Compatibility Paths
 
