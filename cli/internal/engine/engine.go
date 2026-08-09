@@ -60,6 +60,7 @@ type InitResult struct {
 	DependenciesCreated        []string `json:"dependencies_created,omitempty"`
 	MigratedResources          []string `json:"migrated_resources,omitempty"`
 	GitignoreUpdated           bool     `json:"gitignore_updated"`
+	GitStaged                  []string `json:"git_staged,omitempty"`
 	OwnershipConfirmed         []string `json:"ownership_confirmed,omitempty"`
 	OwnershipInferred          []string `json:"ownership_inferred,omitempty"`
 	UnresolvedResources        []string `json:"unresolved_resources,omitempty"`
@@ -120,6 +121,9 @@ func (r InitResult) Text() string {
 		for _, item := range r.Warnings {
 			lines = append(lines, "- "+item)
 		}
+	}
+	for _, item := range r.GitStaged {
+		lines = append(lines, "git staged: "+item)
 	}
 	lines = append(lines, "Files touched:")
 	for _, item := range r.Files {
@@ -211,12 +215,14 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 
 	entrypointFile := filepath.Join(a.Root, manifest.CanonicalEntrypointSourceFile())
 	files = append(files, entrypointFile)
+	var gitStaged []string
 	if !opts.DryRun {
 		entrypointFiles, err := syncManagedEntrypoints(a.Root, m, opts.Force)
 		if err != nil {
 			return nil, err
 		}
 		files = append(files, entrypointFiles...)
+		gitStaged = stageEntrypointMigration(a.Root)
 	}
 
 	ctxpmResource := bundledCtxpmResource(m.Agents)
@@ -273,6 +279,7 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 		DependenciesCreated:        dedupe(append(resourceNames(resourcePlan.dependencies), "ctxpm")),
 		MigratedResources:          resourcePlan.migrated,
 		GitignoreUpdated:           gitignoreUpdated,
+		GitStaged:                  gitStaged,
 		OwnershipConfirmed:         nil,
 		OwnershipInferred:          dedupe(append(discovery.evidence, resourcePlan.ownershipInferred...)),
 		UnresolvedResources:        dedupe(resourcePlan.unresolved),

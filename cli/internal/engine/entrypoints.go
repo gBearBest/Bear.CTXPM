@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -12,14 +13,18 @@ import (
 )
 
 type EntrypointSyncResult struct {
-	Status string   `json:"status"`
-	Files  []string `json:"files,omitempty"`
+	Status    string   `json:"status"`
+	Files     []string `json:"files,omitempty"`
+	GitStaged []string `json:"git_staged,omitempty"`
 }
 
 func (r EntrypointSyncResult) Text() string {
 	lines := []string{"Entrypoint sync status: " + r.Status}
 	for _, item := range r.Files {
 		lines = append(lines, "- "+item)
+	}
+	for _, item := range r.GitStaged {
+		lines = append(lines, "git staged: "+item)
 	}
 	return strings.Join(lines, "\n") + "\n"
 }
@@ -66,7 +71,8 @@ func (a *App) EntrypointSync() (*EntrypointSyncResult, error) {
 	if changed {
 		files = append(files, filepath.Join(a.Root, "ctxpm.yaml"))
 	}
-	return &EntrypointSyncResult{Status: "applied", Files: dedupe(files)}, nil
+	gitStaged := stageEntrypointMigration(a.Root)
+	return &EntrypointSyncResult{Status: "applied", Files: dedupe(files), GitStaged: gitStaged}, nil
 }
 
 func (a *App) EntrypointDoctor() (*EntrypointDoctorResult, error) {
@@ -439,4 +445,57 @@ func managedEntrypointEnvelope(content string) (string, string, bool) {
 		return "", "", false
 	}
 	return content[:start], content[endIndex:], true
+}
+
+// stageEntrypointMigration detects when AGENTS.md was just migrated from a
+// tracked root file to a symlink pointing at .ctxpm/AGENTS.md and automatically
+// applies the corresponding git index operations so the user does not need to
+// run git commands manually. This is best-effort: if git is unavailable or the
+// root is not a git repo the function is a no-op.
+//
+// Operations performed:
+//   - git rm --cached AGENTS.md  (when index has it as a regular file but disk has a symlink)
+//   - git add .ctxpm/AGENTS.md   (when the source file is not yet in the index)
+//   - git add .gitignore          (when .gitignore has unstaged modifications)
+func stageEntrypointMigration(root string) []string {
+	ctx := context.Background()
+	if _, err := runGit(ctx, "-C", root, "rev-parse", "--git-dir"); err != nil {
+		return nil
+	}
+
+	var staged []string
+	canonical := manifest.CanonicalEntrypointFile()
+	source := manifest.CanonicalEntrypointSourceFile()
+
+	// If AGENTS.md is tracked in the git index as a regular file (mode 100644)
+	// but is now a symlink on disk, remove it from the index.
+	lsOut, err := runGit(ctx, "-C", root, "ls-files", "--stage", "--", canonical)
+	if err == nil && strings.HasPrefix(lsOut, "100644") {
+		info, statErr := os.Lstat(filepath.Join(root, canonical))
+		if statErr == nil && info.Mode()&os.ModeSymlink != 0 {
+			if _, rmErr := runGit(ctx, "-C", root, "rm", "--cached", "--", canonical); rmErr == nil {
+				staged = append(staged, "git rm --cached "+canonical)
+			}
+		}
+	}
+
+	// If .ctxpm/AGENTS.md exists on disk but is not yet in the git index, stage it.
+	lsOut, err = runGit(ctx, "-C", root, "ls-files", "--", source)
+	if err == nil && strings.TrimSpace(lsOut) == "" {
+		if _, statErr := os.Lstat(filepath.Join(root, source)); statErr == nil {
+			if _, addErr := runGit(ctx, "-C", root, "add", "--", source); addErr == nil {
+				staged = append(staged, "git add "+source)
+			}
+		}
+	}
+
+	// Stage .gitignore if it has unstaged changes.
+	diffOut, err := runGit(ctx, "-C", root, "diff", "--name-only", "--", ".gitignore")
+	if err == nil && strings.TrimSpace(diffOut) != "" {
+		if _, addErr := runGit(ctx, "-C", root, "add", "--", ".gitignore"); addErr == nil {
+			staged = append(staged, "git add .gitignore")
+		}
+	}
+
+	return staged
 }
