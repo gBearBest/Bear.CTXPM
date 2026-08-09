@@ -383,7 +383,7 @@ func TestInitDetectsExistingClaudeEntrypointWhenAgentOmitted(t *testing.T) {
 	}
 	if target, err := os.Readlink(filepath.Join(root, "CLAUDE.md")); err != nil {
 		t.Fatalf("Readlink() error = %v", err)
-	} else if target != "AGENTS.md" {
+	} else if target != ".ctxpm/AGENTS.md" {
 		t.Fatalf("CLAUDE.md symlink target = %q", target)
 	}
 }
@@ -438,9 +438,10 @@ func TestInitReplacesManagedBlockOnly(t *testing.T) {
 
 func TestInitReportsDamagedManagedBlockWithoutForce(t *testing.T) {
 	root := t.TempDir()
-	entrypoint := filepath.Join(root, "AGENTS.md")
+	// Write damaged block at root; seedCanonicalEntrypoint will move it to .ctxpm/AGENTS.md.
+	setupPath := filepath.Join(root, "AGENTS.md")
 	original := "Intro\n\n<!-- ctxpm:begin agent=generic -->\noutdated\n"
-	if err := os.WriteFile(entrypoint, []byte(original), 0o644); err != nil {
+	if err := os.WriteFile(setupPath, []byte(original), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -452,7 +453,9 @@ func TestInitReportsDamagedManagedBlockWithoutForce(t *testing.T) {
 	if !strings.Contains(err.Error(), "managed ctxpm block is damaged") {
 		t.Fatalf("Init() error = %v", err)
 	}
-	if got := readFileForTest(t, entrypoint); got != original {
+	// File was moved to .ctxpm/AGENTS.md by seedCanonicalEntrypoint; content must be unchanged.
+	movedPath := filepath.Join(root, ".ctxpm", "AGENTS.md")
+	if got := readFileForTest(t, movedPath); got != original {
 		t.Fatalf("damaged entrypoint should remain unchanged\n--- got ---\n%s\n--- want ---\n%s", got, original)
 	}
 }
@@ -543,7 +546,7 @@ func TestInitForceSyncsAgentsAndCompatibility(t *testing.T) {
 	}
 	if target, err := os.Readlink(filepath.Join(root, "CLAUDE.md")); err != nil {
 		t.Fatalf("Readlink() error = %v", err)
-	} else if target != "AGENTS.md" {
+	} else if target != ".ctxpm/AGENTS.md" {
 		t.Fatalf("CLAUDE.md symlink target = %q", target)
 	}
 }
@@ -731,8 +734,15 @@ func TestValidateReportsMissingPackageCompatibility(t *testing.T) {
 
 func TestValidateReportsMissingEntrypointAlias(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte(manifest.ManagedEntrypoint()), 0o644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
+	// Source lives in .ctxpm/; root AGENTS.md is a symlink. CLAUDE.md is absent.
+	if err := os.MkdirAll(filepath.Join(root, ".ctxpm"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".ctxpm", "AGENTS.md"), []byte(manifest.ManagedEntrypoint()), 0o644); err != nil {
+		t.Fatalf("WriteFile(.ctxpm/AGENTS.md) error = %v", err)
+	}
+	if err := os.Symlink(".ctxpm/AGENTS.md", filepath.Join(root, "AGENTS.md")); err != nil {
+		t.Fatalf("Symlink(AGENTS.md) error = %v", err)
 	}
 	writeManifestForTest(t, root, &manifest.Manifest{
 		Version:      manifest.CurrentManifestVersion,
@@ -787,15 +797,22 @@ func TestEntrypointSyncCreatesSharedAliases(t *testing.T) {
 	}
 	if target, err := os.Readlink(filepath.Join(root, "CLAUDE.md")); err != nil {
 		t.Fatalf("Readlink() error = %v", err)
-	} else if target != "AGENTS.md" {
+	} else if target != ".ctxpm/AGENTS.md" {
 		t.Fatalf("CLAUDE.md symlink target = %q", target)
 	}
 }
 
 func TestEntrypointDoctorGuidesMergeForRealAliasFile(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte(manifest.ManagedEntrypoint()), 0o644); err != nil {
-		t.Fatalf("WriteFile(AGENTS.md) error = %v", err)
+	// Source in .ctxpm/, root AGENTS.md is a symlink. CLAUDE.md exists as a real file (needs migration).
+	if err := os.MkdirAll(filepath.Join(root, ".ctxpm"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".ctxpm", "AGENTS.md"), []byte(manifest.ManagedEntrypoint()), 0o644); err != nil {
+		t.Fatalf("WriteFile(.ctxpm/AGENTS.md) error = %v", err)
+	}
+	if err := os.Symlink(".ctxpm/AGENTS.md", filepath.Join(root, "AGENTS.md")); err != nil {
+		t.Fatalf("Symlink(AGENTS.md) error = %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "CLAUDE.md"), []byte("custom\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile(CLAUDE.md) error = %v", err)
@@ -1217,18 +1234,22 @@ func TestUpdateRefreshesAllManagedEntrypoints(t *testing.T) {
 	server := newSingleFileUpdateServer(t, "/reviewer.md", "# reviewer\n")
 	defer server.Close()
 
-	for _, item := range []struct {
-		file string
-		body string
-	}{
-		{file: "AGENTS.md", body: "shared instructions"},
-		{file: "CLAUDE.md", body: "shared instructions"},
-	} {
-		path := filepath.Join(root, item.file)
-		original := "Intro\n\n<!-- ctxpm:begin -->\n" + item.body + "\n<!-- ctxpm:end -->\n\nFooter\n"
-		if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
-			t.Fatalf("WriteFile(%s) error = %v", item.file, err)
-		}
+	// New-world setup: source file lives in .ctxpm/, root AGENTS.md is a symlink.
+	sourceDir := filepath.Join(root, ".ctxpm")
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	sourcePath := filepath.Join(sourceDir, "AGENTS.md")
+	sourceBody := "Intro\n\n<!-- ctxpm:begin -->\nshared instructions\n<!-- ctxpm:end -->\n\nFooter\n"
+	if err := os.WriteFile(sourcePath, []byte(sourceBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(.ctxpm/AGENTS.md) error = %v", err)
+	}
+	// AGENTS.md and CLAUDE.md at root are symlinks pointing to the source.
+	if err := os.Symlink(".ctxpm/AGENTS.md", filepath.Join(root, "AGENTS.md")); err != nil {
+		t.Fatalf("Symlink(AGENTS.md) error = %v", err)
+	}
+	if err := os.Symlink(".ctxpm/AGENTS.md", filepath.Join(root, "CLAUDE.md")); err != nil {
+		t.Fatalf("Symlink(CLAUDE.md) error = %v", err)
 	}
 	writeManifestForTest(t, root, &manifest.Manifest{
 		Version: manifest.CurrentManifestVersion,
@@ -1262,14 +1283,15 @@ func TestUpdateRefreshesAllManagedEntrypoints(t *testing.T) {
 		t.Fatalf("Update() error = %v", err)
 	}
 
-	got := readFileForTest(t, filepath.Join(root, "AGENTS.md"))
+	got := readFileForTest(t, filepath.Join(root, ".ctxpm", "AGENTS.md"))
 	want := "Intro\n\n" + manifest.ManagedEntrypoint() + "\n\nFooter\n"
 	if got != want {
-		t.Fatalf("AGENTS.md mismatch\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		t.Fatalf(".ctxpm/AGENTS.md mismatch\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
+	// Root AGENTS.md and CLAUDE.md remain valid symlinks pointing to the source.
 	if target, err := os.Readlink(filepath.Join(root, "CLAUDE.md")); err != nil {
 		t.Fatalf("Readlink() error = %v", err)
-	} else if target != "AGENTS.md" {
+	} else if target != ".ctxpm/AGENTS.md" {
 		t.Fatalf("CLAUDE.md symlink target = %q", target)
 	}
 }
@@ -1363,9 +1385,10 @@ func TestUpdateReportsDamagedManagedBlock(t *testing.T) {
 	server := newSingleFileUpdateServer(t, "/reviewer.md", "# reviewer\n")
 	defer server.Close()
 
-	entrypoint := filepath.Join(root, "AGENTS.md")
+	// Write damaged block at root; seedCanonicalEntrypoint will move it to .ctxpm/AGENTS.md.
+	setupPath := filepath.Join(root, "AGENTS.md")
 	original := "Intro\n\n<!-- ctxpm:begin agent=generic -->\nold instructions\n"
-	if err := os.WriteFile(entrypoint, []byte(original), 0o644); err != nil {
+	if err := os.WriteFile(setupPath, []byte(original), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	writeManifestForTest(t, root, &manifest.Manifest{
@@ -1402,7 +1425,9 @@ func TestUpdateReportsDamagedManagedBlock(t *testing.T) {
 	if !strings.Contains(err.Error(), "managed ctxpm block is damaged") {
 		t.Fatalf("Update() error = %v", err)
 	}
-	if got := readFileForTest(t, entrypoint); got != original {
+	// File was moved to .ctxpm/AGENTS.md by seedCanonicalEntrypoint; content must be unchanged.
+	movedPath := filepath.Join(root, ".ctxpm", "AGENTS.md")
+	if got := readFileForTest(t, movedPath); got != original {
 		t.Fatalf("damaged entrypoint should remain unchanged\n--- got ---\n%s\n--- want ---\n%s", got, original)
 	}
 }

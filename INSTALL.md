@@ -43,12 +43,14 @@ Prioritize the following profiles:
 If the user does not clearly specify one:
 
 1. First check whether the project root already contains any of these files:
+   - `.ctxpm/AGENTS.md`
    - `AGENTS.md`
    - `CLAUDE.md`
    - `ANTIGRAVITY.md`
-2. If one of these files exists, prefer the corresponding profile.
-3. If none of the known entrypoint files exists, ask the user which agent they primarily use.
-4. If the user is still unsure, default to `generic`.
+2. If `.ctxpm/AGENTS.md` or `AGENTS.md` exists, prefer `generic` (or `codex` if Codex is detected).
+3. If one of the agent-specific files exists, prefer the corresponding profile.
+4. If none of the known entrypoint files exists, ask the user which agent they primarily use.
+5. If the user is still unsure, default to `generic`.
 
 The mapping between agents and default root entrypoint filenames is:
 
@@ -59,7 +61,7 @@ The mapping between agents and default root entrypoint filenames is:
 | `antigravity` | `ANTIGRAVITY.md` |
 | `generic` | `AGENTS.md` |
 
-In the shared-entrypoint model, `AGENTS.md` is always the canonical managed file. Agent-specific filenames such as `CLAUDE.md` and `ANTIGRAVITY.md` are compatibility symlinks that point back to `AGENTS.md` when those agent profiles are declared.
+In the shared-entrypoint model, `.ctxpm/AGENTS.md` is the canonical managed source file. All root-level entrypoint filenames (`AGENTS.md`, `CLAUDE.md`, `ANTIGRAVITY.md`) are symlinks that point directly to `.ctxpm/AGENTS.md` and should be kept out of version control via `.gitignore`.
 
 ---
 

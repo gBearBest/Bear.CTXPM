@@ -68,8 +68,12 @@ func detectInitAgent(root string, requested string, m *manifest.Manifest) initDi
 	}{
 		{agent: "claude-code", file: "CLAUDE.md"},
 		{agent: "antigravity", file: "ANTIGRAVITY.md"},
+		{agent: "generic", file: manifest.CanonicalEntrypointSourceFile()},
 		{agent: "generic", file: "AGENTS.md"},
 	} {
+		if _, alreadySeen := existing[candidate.agent]; alreadySeen {
+			continue
+		}
 		if _, err := os.Stat(filepath.Join(root, candidate.file)); err == nil {
 			existing[candidate.agent] = candidate.file
 		}

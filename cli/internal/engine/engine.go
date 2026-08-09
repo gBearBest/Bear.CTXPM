@@ -209,7 +209,7 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 	sortResources(m.Packages)
 	sortResources(m.Dependencies)
 
-	entrypointFile := filepath.Join(a.Root, manifest.CanonicalEntrypointFile())
+	entrypointFile := filepath.Join(a.Root, manifest.CanonicalEntrypointSourceFile())
 	files = append(files, entrypointFile)
 	if !opts.DryRun {
 		entrypointFiles, err := syncManagedEntrypoints(a.Root, m, opts.Force)

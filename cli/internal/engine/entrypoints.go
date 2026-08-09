@@ -137,30 +137,31 @@ func syncManagedEntrypoints(root string, m *manifest.Manifest, allowRepair bool)
 		distinct[manifest.CanonicalEntrypointFile()] = true
 	}
 
-	managedFiles := make([]string, 0, len(distinct))
-	for file := range distinct {
-		if strings.TrimSpace(file) == "" {
-			continue
-		}
-		managedFiles = append(managedFiles, file)
+	// Write managed content to the source file inside .ctxpm/.
+	sourceAbs := filepath.Join(root, manifest.CanonicalEntrypointSourceFile())
+	if err := os.MkdirAll(filepath.Dir(sourceAbs), 0o755); err != nil {
+		return nil, err
 	}
-	sort.Strings(managedFiles)
-	for _, file := range managedFiles {
-		abs := filepath.Join(root, file)
-		if err := ensureManagedEntrypoint(abs, allowRepair); err != nil {
-			return nil, err
-		}
-		files = append(files, abs)
+	if err := ensureManagedEntrypoint(sourceAbs, allowRepair); err != nil {
+		return nil, err
 	}
+	files = append(files, sourceAbs)
 
+	// Create the root-level AGENTS.md symlink (always present, points directly to source).
+	canonicalAliasAbs := filepath.Join(root, manifest.CanonicalEntrypointFile())
+	if err := ensureEntrypointAlias(canonicalAliasAbs, sourceAbs); err != nil {
+		return nil, err
+	}
+	files = append(files, canonicalAliasAbs)
+
+	// Create agent-specific aliases (e.g. CLAUDE.md, ANTIGRAVITY.md), also pointing to source.
 	for _, agent := range entrypointAgents(m) {
 		alias := manifest.EntrypointFile(agent)
 		if alias == "" || alias == manifest.CanonicalEntrypointFile() {
 			continue
 		}
 		aliasAbs := filepath.Join(root, alias)
-		canonicalAbs := filepath.Join(root, manifest.CanonicalEntrypointFile())
-		if err := ensureEntrypointAlias(aliasAbs, canonicalAbs); err != nil {
+		if err := ensureEntrypointAlias(aliasAbs, sourceAbs); err != nil {
 			return nil, err
 		}
 		files = append(files, aliasAbs)
@@ -197,50 +198,62 @@ func validateManagedEntrypoints(root string, m *manifest.Manifest) []string {
 	}
 
 	agents := entrypointAgents(m)
-	canonicalAbs := filepath.Join(root, manifest.CanonicalEntrypointFile())
+	sourceAbs := filepath.Join(root, manifest.CanonicalEntrypointSourceFile())
+	sourceExists := false
 	if len(agents) > 0 {
-		switch state, err := readManagedEntrypointState(canonicalAbs); {
+		switch state, err := readManagedEntrypointState(sourceAbs); {
 		case errors.Is(err, os.ErrNotExist):
-			// AGENTS.md is absent — only a problem when entrypoints are explicitly
-			// declared. When entrypoints are omitted (default), Migrate and other
-			// non-entrypoint commands are not expected to create it.
 			if len(m.Entrypoints) > 0 {
 				issues = append(issues, fmt.Sprintf("managed entrypoint %q is missing", manifest.CanonicalEntrypointFile()))
 			}
 		case err != nil:
 			issues = append(issues, err.Error())
 		case !state.HasManagedBlock:
+			sourceExists = true
 			issues = append(issues, fmt.Sprintf("managed entrypoint %q does not contain a ctxpm managed block", manifest.CanonicalEntrypointFile()))
 		case state.Damaged:
+			sourceExists = true
 			issues = append(issues, fmt.Sprintf("managed entrypoint %q has a damaged ctxpm managed block", manifest.CanonicalEntrypointFile()))
 		case strings.TrimRight(state.Block, "\n") != strings.TrimRight(manifest.ManagedEntrypoint(), "\n"):
+			sourceExists = true
 			issues = append(issues, fmt.Sprintf("managed entrypoint %q is out of date; run `ctxpm entrypoint sync`", manifest.CanonicalEntrypointFile()))
+		default:
+			sourceExists = true
 		}
 	}
 
-	for _, agent := range agents {
-		alias := manifest.EntrypointFile(agent)
-		if alias == "" || alias == manifest.CanonicalEntrypointFile() {
-			continue
-		}
-		aliasAbs := filepath.Join(root, alias)
-		relTarget, _ := filepath.Rel(filepath.Dir(aliasAbs), canonicalAbs)
-		current, err := os.Readlink(aliasAbs)
-		if err == nil {
-			if current != relTarget {
-				issues = append(issues, fmt.Sprintf("entrypoint alias %q points to %q instead of %q", alias, current, relTarget))
+	// Validate all root-level entrypoint symlinks only when the source file exists.
+	// When source is absent (never synced), aliases can't point anywhere yet.
+	if sourceExists {
+		validateAlias := func(alias string) {
+			aliasAbs := filepath.Join(root, alias)
+			relTarget, _ := filepath.Rel(filepath.Dir(aliasAbs), sourceAbs)
+			current, err := os.Readlink(aliasAbs)
+			if err == nil {
+				if current != relTarget {
+					issues = append(issues, fmt.Sprintf("entrypoint alias %q points to %q instead of %q", alias, current, relTarget))
+				}
+				return
 			}
-			continue
+			if errors.Is(err, os.ErrNotExist) {
+				issues = append(issues, fmt.Sprintf("entrypoint alias %q is missing", alias))
+				return
+			}
+			if _, statErr := os.Lstat(aliasAbs); statErr == nil {
+				issues = append(issues, entrypointMergeGuidance([]string{alias}))
+				return
+			}
+			issues = append(issues, fmt.Sprintf("entrypoint alias %q could not be inspected: %v", alias, err))
 		}
-		if errors.Is(err, os.ErrNotExist) {
-			issues = append(issues, fmt.Sprintf("entrypoint alias %q is missing", alias))
-			continue
+
+		validateAlias(manifest.CanonicalEntrypointFile())
+		for _, agent := range agents {
+			alias := manifest.EntrypointFile(agent)
+			if alias == "" || alias == manifest.CanonicalEntrypointFile() {
+				continue
+			}
+			validateAlias(alias)
 		}
-		if _, statErr := os.Lstat(aliasAbs); statErr == nil {
-			issues = append(issues, entrypointMergeGuidance([]string{alias}))
-			continue
-		}
-		issues = append(issues, fmt.Sprintf("entrypoint alias %q could not be inspected: %v", alias, err))
 	}
 	return dedupe(issues)
 }
@@ -266,13 +279,15 @@ func entrypointAgents(m *manifest.Manifest) []string {
 }
 
 func entrypointGitignoreRules(m *manifest.Manifest) []string {
-	rules := []string{}
+	// Always gitignore the root AGENTS.md symlink; the source lives in .ctxpm/AGENTS.md.
+	// Use a leading "/" so the rule matches only the project root, not .ctxpm/AGENTS.md.
+	rules := []string{"/" + manifest.CanonicalEntrypointFile()}
 	for _, agent := range entrypointAgents(m) {
 		file := manifest.EntrypointFile(agent)
 		if file == "" || file == manifest.CanonicalEntrypointFile() {
 			continue
 		}
-		rules = append(rules, file)
+		rules = append(rules, "/"+file)
 	}
 	return dedupe(rules)
 }
@@ -288,19 +303,30 @@ func entrypointMergeGuidance(files []string) string {
 }
 
 func seedCanonicalEntrypoint(root string, m *manifest.Manifest) error {
-	canonical := filepath.Join(root, manifest.CanonicalEntrypointFile())
-	if _, err := os.Lstat(canonical); err == nil {
+	sourceAbs := filepath.Join(root, manifest.CanonicalEntrypointSourceFile())
+	if _, err := os.Lstat(sourceAbs); err == nil {
 		return nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 
-	candidates := []string{}
+	if err := os.MkdirAll(filepath.Dir(sourceAbs), 0o755); err != nil {
+		return err
+	}
+
+	// Collect all real (non-symlink) root-level entrypoint files as migration candidates,
+	// including AGENTS.md itself (which was the canonical file before this change).
+	candidateFiles := []string{manifest.CanonicalEntrypointFile()}
 	for _, agent := range entrypointAgents(m) {
 		file := manifest.EntrypointFile(agent)
 		if file == "" || file == manifest.CanonicalEntrypointFile() {
 			continue
 		}
+		candidateFiles = append(candidateFiles, file)
+	}
+
+	candidates := []string{}
+	for _, file := range dedupe(candidateFiles) {
 		abs := filepath.Join(root, file)
 		info, err := os.Lstat(abs)
 		if errors.Is(err, os.ErrNotExist) {
@@ -325,7 +351,7 @@ func seedCanonicalEntrypoint(root string, m *manifest.Manifest) error {
 		}
 		return errors.New(entrypointMergeGuidance(labels))
 	}
-	return os.Rename(candidates[0], canonical)
+	return os.Rename(candidates[0], sourceAbs)
 }
 
 func ensureEntrypointAlias(aliasPath, canonicalPath string) error {

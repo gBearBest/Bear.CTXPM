@@ -539,6 +539,13 @@ func CanonicalEntrypointFile() string {
 	return "AGENTS.md"
 }
 
+// CanonicalEntrypointSourceFile returns the path inside .ctxpm where the
+// managed entrypoint content is stored. All root-level agent entrypoint files
+// are symlinks pointing to this path.
+func CanonicalEntrypointSourceFile() string {
+	return ".ctxpm/AGENTS.md"
+}
+
 func EntrypointFile(agent string) string {
 	switch agent {
 	case "claude-code":
