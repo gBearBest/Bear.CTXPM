@@ -551,6 +551,109 @@ func TestInitForceSyncsAgentsAndCompatibility(t *testing.T) {
 	}
 }
 
+func TestInitDetectsGeminiEntrypointWhenAgentOmitted(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "GEMINI.md"), []byte("gemini config\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	app := New(root)
+	result, err := app.Init(InitOptions{})
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	if result.Agent != "gemini-cli" || result.EntrypointFile != "AGENTS.md" {
+		t.Fatalf("Init() result agent=%q entrypoint=%q", result.Agent, result.EntrypointFile)
+	}
+	if target, err := os.Readlink(filepath.Join(root, "GEMINI.md")); err != nil {
+		t.Fatalf("Readlink(GEMINI.md) error = %v", err)
+	} else if target != ".ctxpm/AGENTS.md" {
+		t.Fatalf("GEMINI.md symlink target = %q, want .ctxpm/AGENTS.md", target)
+	}
+}
+
+func TestInitCreatesCompatibilitySymlinksForNewAgents(t *testing.T) {
+	tests := []struct {
+		agent      string
+		entrypoint string
+		compatDir  string
+	}{
+		{agent: "gemini-cli", entrypoint: "GEMINI.md", compatDir: ".gemini"},
+		{agent: "cursor", entrypoint: "AGENTS.md", compatDir: ".cursor"},
+		{agent: "windsurf", entrypoint: "AGENTS.md", compatDir: ".windsurf"},
+		{agent: "kiro", entrypoint: "AGENTS.md", compatDir: ".kiro"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.agent, func(t *testing.T) {
+			root := t.TempDir()
+			app := New(root)
+			if _, err := app.Init(InitOptions{Agent: tt.agent}); err != nil {
+				t.Fatalf("Init() error = %v", err)
+			}
+			loaded, _, err := manifest.Load(root)
+			if err != nil {
+				t.Fatalf("manifest.Load() error = %v", err)
+			}
+			if !hasString(loaded.Agents, tt.agent) {
+				t.Fatalf("agents = %v, want to contain %q", loaded.Agents, tt.agent)
+			}
+			compatPath := filepath.Join(root, tt.compatDir, "skills", "ctxpm")
+			if _, err := os.Lstat(compatPath); err != nil {
+				t.Fatalf("expected %s/skills/ctxpm to exist: %v", tt.compatDir, err)
+			}
+			target, err := os.Readlink(compatPath)
+			if err != nil {
+				t.Fatalf("Readlink(%s/skills/ctxpm) error = %v", tt.compatDir, err)
+			}
+			if target != "../../.ctxpm/dependencies/skills/ctxpm" {
+				t.Fatalf("compat symlink target = %q, want ../../.ctxpm/dependencies/skills/ctxpm", target)
+			}
+			if _, err := os.Lstat(filepath.Join(root, tt.entrypoint)); err != nil {
+				t.Fatalf("expected %s to exist: %v", tt.entrypoint, err)
+			}
+		})
+	}
+}
+
+func TestInitForceSyncsWithGeminiAndCursor(t *testing.T) {
+	root := t.TempDir()
+	app := New(root)
+	if _, err := app.Init(InitOptions{Agent: "generic"}); err != nil {
+		t.Fatalf("Init(generic) error = %v", err)
+	}
+	if _, err := app.Init(InitOptions{Agent: "gemini-cli", Force: true}); err != nil {
+		t.Fatalf("Init(gemini-cli) error = %v", err)
+	}
+	if _, err := app.Init(InitOptions{Agent: "cursor", Force: true}); err != nil {
+		t.Fatalf("Init(cursor) error = %v", err)
+	}
+
+	loaded, _, err := manifest.Load(root)
+	if err != nil {
+		t.Fatalf("manifest.Load() error = %v", err)
+	}
+	for _, agent := range []string{"generic", "gemini-cli", "cursor"} {
+		if !hasString(loaded.Agents, agent) {
+			t.Fatalf("agents = %v, want to contain %q", loaded.Agents, agent)
+		}
+	}
+	for _, relative := range []string{
+		".agents/skills/ctxpm",
+		".gemini/skills/ctxpm",
+		".cursor/skills/ctxpm",
+		"AGENTS.md",
+		"GEMINI.md",
+	} {
+		if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(relative))); err != nil {
+			t.Fatalf("expected %s to exist: %v", relative, err)
+		}
+	}
+	if target, err := os.Readlink(filepath.Join(root, "GEMINI.md")); err != nil {
+		t.Fatalf("Readlink(GEMINI.md) error = %v", err)
+	} else if target != ".ctxpm/AGENTS.md" {
+		t.Fatalf("GEMINI.md symlink target = %q, want .ctxpm/AGENTS.md", target)
+	}
+}
+
 func TestInitMigratesExistingSkillDirectoryIntoPackages(t *testing.T) {
 	root := t.TempDir()
 	skillRoot := filepath.Join(root, "skills", "reviewer")

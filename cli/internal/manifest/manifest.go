@@ -474,6 +474,14 @@ func agentCompatibilityPrefix(agent string) string {
 		return ".claude"
 	case "antigravity":
 		return ".antigravity"
+	case "gemini-cli":
+		return ".gemini"
+	case "cursor":
+		return ".cursor"
+	case "windsurf":
+		return ".windsurf"
+	case "kiro":
+		return ".kiro"
 	default:
 		return ""
 	}
@@ -552,6 +560,8 @@ func EntrypointFile(agent string) string {
 		return "CLAUDE.md"
 	case "antigravity":
 		return "ANTIGRAVITY.md"
+	case "gemini-cli":
+		return "GEMINI.md"
 	default:
 		return "AGENTS.md"
 	}
