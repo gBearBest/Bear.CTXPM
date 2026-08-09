@@ -23,14 +23,6 @@ update_policy:
 dependencies: []
 
 packages: []
-
-entrypoints:
-  codex:
-    file: AGENTS.md
-    mode: managed
-  claude-code:
-    file: AGENTS.md
-    mode: managed
 ```
 
 ## Top-Level Fields
@@ -43,7 +35,6 @@ entrypoints:
 | `update_policy` | No | Policy for dependency update checks. |
 | `dependencies` | Yes | External AI resources managed under `.ctxpm/dependencies/`. |
 | `packages` | Yes | Project-local AI resources managed under `.ctxpm/packages/`. |
-| `entrypoints` | Yes | Canonical root Markdown entrypoint mapping for each declared agent profile. |
 
 ## Core Concepts
 
@@ -96,7 +87,6 @@ Every `dependencies` or `packages` item uses the same root-level shape:
 | `layout` | Yes | `file` or `dir`. |
 | `path` | Yes | Canonical local resource root under `.ctxpm/dependencies/` or `.ctxpm/packages/`. |
 | `entry` | Yes | Entry file relative to the canonical root. |
-| `compatibility` | No | Compatibility exposure paths outside `.ctxpm`. |
 | `source` | Dependencies only | Upstream source metadata. |
 | `version` | Dependencies only | Installed dependency version metadata for the resolved resource root. |
 
@@ -134,8 +124,6 @@ dependencies:
       path: skills/reviewer
       entry: SKILL.md
     version: 0123456789abcdef0123456789abcdef01234567
-    compatibility:
-      - .agents/skills/reviewer
 ```
 
 Rules:
@@ -251,8 +239,6 @@ packages:
     layout: dir
     path: .ctxpm/packages/rules/project-review-rules
     entry: README.md
-    compatibility:
-      - .agents/rules/project-review-rules
 ```
 
 Rules:
@@ -260,39 +246,46 @@ Rules:
 - Packages normally omit `source` and `version`.
 - Use the same `layout` / `path` / `entry` model as dependencies.
 
-## `entrypoints`
-
-`entrypoints` records which canonical shared root Markdown file each declared agent profile uses.
-
-```yaml
-entrypoints:
-  codex:
-    file: AGENTS.md
-    mode: managed
-  claude-code:
-    file: AGENTS.md
-    mode: managed
-```
-
-Rules:
-
-- Keys should match entries in `agents`.
-- `file` is the canonical root entrypoint Markdown file for that agent profile.
-- In the shared-entrypoint model, multiple agent profiles can point at the same canonical `AGENTS.md`.
-- `mode` should be `managed` for the shared root entrypoint model.
-- Agent-specific root filenames such as `CLAUDE.md` or `ANTIGRAVITY.md` are compatibility symlinks inferred from the declared agent profiles and should point back to `AGENTS.md`.
-
 ## Compatibility Paths
 
-Use `compatibility` when an agent expects resources in a default discovery location.
+Compatibility paths expose a canonical `.ctxpm` resource root at the agent-recognizable discovery location expected by each agent profile.
+
+`compatibility` is not a field in `ctxpm.yaml`. Paths are derived automatically from all declared agents in `agents` and are never written into the manifest. The tool manages symlinks based on derivation alone.
+
+Derived paths follow this formula:
+
+- `layout: dir` → `<agent-dir-prefix>/<type-plural>/<name>`
+- `layout: file` → `<agent-dir-prefix>/<type-plural>/<filename>` (last segment of `path`)
+
+Agent profile to directory prefix:
+
+| Agent profile | Directory prefix |
+| --- | --- |
+| `generic` | `.agents/` |
+| `codex` | `.agents/` |
+| `claude-code` | `.claude/` |
+| `antigravity` | `.antigravity/` |
+| `gemini-cli` | `.gemini/` |
+| `cursor` | `.cursor/` |
+| `windsurf` | `.windsurf/` |
+| `kiro` | `.kiro/` |
+
+Resource type to subdirectory:
+
+| Type | Subdirectory |
+| --- | --- |
+| `skill` | `skills` |
+| `rule` | `rules` |
+| `spec` | `specs` |
+| `prompt` | `prompts` |
+| `memory` | `memories` |
+| `mcp` | `mcp` |
 
 Rules:
 
 - Compatibility paths point from agent-recognizable discovery locations to canonical `.ctxpm` roots.
-- Record precise paths in `ctxpm.yaml` even when `.gitignore` uses broader ignore rules.
-- `ctxpm install` should repair missing compatibility links for both dependencies and packages.
-- `ctxpm install` should scan existing canonical resources under `.ctxpm/` and register missing entries in `ctxpm.yaml`.
-- `ctxpm install` should also ensure `.gitignore` contains safe compatibility ignore rules for those repaired paths.
+- `ctxpm install` creates and repairs compatibility symlinks derived from `agents` for both dependencies and packages.
+- `ctxpm install` also ensures `.gitignore` contains safe compatibility ignore rules.
 
 ## Editing Rules
 
@@ -304,3 +297,4 @@ When modifying `ctxpm.yaml`:
 4. Keep paths relative to the project root.
 5. Keep `dependencies` and `packages` semantically separate.
 6. Prefer minimal text edits over full-file rewrites when only a small field changes.
+7. Do not add `compatibility` or `entrypoints` fields — they are not part of the schema. Compatibility paths are derived automatically; entrypoints always use `AGENTS.md + managed`.

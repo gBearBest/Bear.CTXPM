@@ -171,6 +171,12 @@ func ensureBundledCtxpm(root string, agents []string) (*bundledCtxpmResult, erro
 		result.Warnings = append(result.Warnings, fmt.Sprintf("could not prepare local CLI directory: %v", err))
 	} else {
 		created = append(created, filepath.Dir(cliPath))
+		cliReadmePath := filepath.Join(filepath.Dir(cliPath), "README.md")
+		if err := os.WriteFile(cliReadmePath, []byte(bundledCtxpmCLIReadmeContent), 0o644); err != nil {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("could not write CLI README: %v", err))
+		} else {
+			created = append(created, cliReadmePath)
+		}
 		status, warnings := prepareBundledCLI(context.Background(), cliPath, root)
 		result.LocalCLIStatus = status
 		result.Warnings = append(result.Warnings, warnings...)
@@ -179,10 +185,10 @@ func ensureBundledCtxpm(root string, agents []string) (*bundledCtxpmResult, erro
 		}
 	}
 
-	if err := ensureCompatibility(root, resource); err != nil {
+	if err := ensureCompatibility(root, agents, resource); err != nil {
 		return nil, err
 	}
-	for _, compat := range resource.Compatibility {
+	for _, compat := range manifest.DerivedCompatibilityPaths(agents, resource) {
 		created = append(created, filepath.Join(root, filepath.FromSlash(compat)))
 	}
 	result.Files = dedupe(created)
@@ -193,7 +199,7 @@ func ensureBundledCtxpm(root string, agents []string) (*bundledCtxpmResult, erro
 }
 
 func bundledCtxpmResource(agents []string) manifest.Resource {
-	resource := manifest.Resource{
+	return manifest.Resource{
 		Name:   "ctxpm",
 		Type:   "skill",
 		Layout: manifest.LayoutDir,
@@ -207,8 +213,6 @@ func bundledCtxpmResource(agents []string) manifest.Resource {
 		},
 		Version: currentBuildRevision(),
 	}
-	resource.Compatibility = compatibilityPaths(agents, resource)
-	return resource
 }
 
 func currentBuildRevision() string {

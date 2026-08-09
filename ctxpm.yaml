@@ -18,25 +18,15 @@ dependencies:
       url: https://github.com/gBearBest/Bear.CTXPM
       path: resources/skills/ctxpm
       entry: SKILL.md
-    version: 1b194b5766c46bf6f1b39a76b446170a7e7c244e
-    compatibility:
-      - .agents/skills/ctxpm
+    version: 8956a3932504485287fe4c4e2619f6189b4e9ce4
 packages:
   - name: ctxpm-release
     type: skill
     layout: dir
     path: .ctxpm/packages/skills/ctxpm-release
     entry: SKILL.md
-    compatibility:
-      - .agents/skills/ctxpm-release
   - name: ctxpm-source-boundary
     type: rule
     layout: file
     path: .ctxpm/packages/rules/ctxpm-source-boundary.md
     entry: ctxpm-source-boundary.md
-    compatibility:
-      - .agents/rules/ctxpm-source-boundary.md
-entrypoints:
-  generic:
-    file: AGENTS.md
-    mode: managed

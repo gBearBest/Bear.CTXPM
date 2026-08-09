@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -12,14 +13,18 @@ import (
 )
 
 type EntrypointSyncResult struct {
-	Status string   `json:"status"`
-	Files  []string `json:"files,omitempty"`
+	Status    string   `json:"status"`
+	Files     []string `json:"files,omitempty"`
+	GitStaged []string `json:"git_staged,omitempty"`
 }
 
 func (r EntrypointSyncResult) Text() string {
 	lines := []string{"Entrypoint sync status: " + r.Status}
 	for _, item := range r.Files {
 		lines = append(lines, "- "+item)
+	}
+	for _, item := range r.GitStaged {
+		lines = append(lines, "git staged: "+item)
 	}
 	return strings.Join(lines, "\n") + "\n"
 }
@@ -66,7 +71,8 @@ func (a *App) EntrypointSync() (*EntrypointSyncResult, error) {
 	if changed {
 		files = append(files, filepath.Join(a.Root, "ctxpm.yaml"))
 	}
-	return &EntrypointSyncResult{Status: "applied", Files: dedupe(files)}, nil
+	gitStaged := stageEntrypointMigration(a.Root)
+	return &EntrypointSyncResult{Status: "applied", Files: dedupe(files), GitStaged: gitStaged}, nil
 }
 
 func (a *App) EntrypointDoctor() (*EntrypointDoctorResult, error) {
@@ -81,46 +87,14 @@ func (a *App) EntrypointDoctor() (*EntrypointDoctorResult, error) {
 	return &EntrypointDoctorResult{OK: len(issues) == 0, Issues: issues}, nil
 }
 
+// normalizeSharedEntrypoints clears any deprecated Entrypoints field that may
+// have been parsed from an old yaml file. Returns true if the field was non-nil.
 func normalizeSharedEntrypoints(m *manifest.Manifest) bool {
-	if m == nil {
+	if m == nil || m.Entrypoints == nil {
 		return false
 	}
-	changed := false
-	if m.Entrypoints == nil {
-		m.Entrypoints = map[string]manifest.Entrypoint{}
-	}
-	delete(m.Entrypoints, "")
-
-	agents := map[string]bool{}
-	for _, agent := range m.Agents {
-		if trimmed := strings.TrimSpace(agent); trimmed != "" {
-			agents[trimmed] = true
-		}
-	}
-	for agent := range m.Entrypoints {
-		if trimmed := strings.TrimSpace(agent); trimmed != "" {
-			agents[trimmed] = true
-		}
-	}
-
-	if len(agents) == 0 {
-		return changed
-	}
-
-	keys := make([]string, 0, len(agents))
-	for agent := range agents {
-		keys = append(keys, agent)
-	}
-	sort.Strings(keys)
-	for _, agent := range keys {
-		m.Agents = appendIfMissing(m.Agents, agent)
-		want := manifest.Entrypoint{File: manifest.CanonicalEntrypointFile(), Mode: "managed"}
-		if current, ok := m.Entrypoints[agent]; !ok || current.File != want.File || current.EffectiveMode() != want.Mode {
-			m.Entrypoints[agent] = want
-			changed = true
-		}
-	}
-	return changed
+	m.Entrypoints = nil
+	return true
 }
 
 func syncManagedEntrypoints(root string, m *manifest.Manifest, allowRepair bool) ([]string, error) {
@@ -131,41 +105,32 @@ func syncManagedEntrypoints(root string, m *manifest.Manifest, allowRepair bool)
 	if err := seedCanonicalEntrypoint(root, m); err != nil {
 		return nil, err
 	}
-	distinct := map[string]bool{}
-	for _, entrypoint := range m.Entrypoints {
-		if entrypoint.EffectiveMode() != "managed" {
-			continue
-		}
-		distinct[strings.TrimSpace(entrypoint.File)] = true
-	}
-	if len(distinct) == 0 {
-		distinct[manifest.CanonicalEntrypointFile()] = true
-	}
 
-	managedFiles := make([]string, 0, len(distinct))
-	for file := range distinct {
-		if strings.TrimSpace(file) == "" {
-			continue
-		}
-		managedFiles = append(managedFiles, file)
+	// Write managed content to the source file inside .ctxpm/.
+	sourceAbs := filepath.Join(root, manifest.CanonicalEntrypointSourceFile())
+	if err := os.MkdirAll(filepath.Dir(sourceAbs), 0o755); err != nil {
+		return nil, err
 	}
-	sort.Strings(managedFiles)
-	for _, file := range managedFiles {
-		abs := filepath.Join(root, file)
-		if err := ensureManagedEntrypoint(abs, allowRepair); err != nil {
-			return nil, err
-		}
-		files = append(files, abs)
+	if err := ensureManagedEntrypoint(sourceAbs, allowRepair); err != nil {
+		return nil, err
 	}
+	files = append(files, sourceAbs)
 
+	// Create the root-level AGENTS.md symlink (always present, points directly to source).
+	canonicalAliasAbs := filepath.Join(root, manifest.CanonicalEntrypointFile())
+	if err := ensureEntrypointAlias(canonicalAliasAbs, sourceAbs); err != nil {
+		return nil, err
+	}
+	files = append(files, canonicalAliasAbs)
+
+	// Create agent-specific aliases (e.g. CLAUDE.md, ANTIGRAVITY.md), also pointing to source.
 	for _, agent := range entrypointAgents(m) {
 		alias := manifest.EntrypointFile(agent)
 		if alias == "" || alias == manifest.CanonicalEntrypointFile() {
 			continue
 		}
 		aliasAbs := filepath.Join(root, alias)
-		canonicalAbs := filepath.Join(root, manifest.CanonicalEntrypointFile())
-		if err := ensureEntrypointAlias(aliasAbs, canonicalAbs); err != nil {
+		if err := ensureEntrypointAlias(aliasAbs, sourceAbs); err != nil {
 			return nil, err
 		}
 		files = append(files, aliasAbs)
@@ -177,67 +142,64 @@ func validateManagedEntrypoints(root string, m *manifest.Manifest) []string {
 	if m == nil {
 		return nil
 	}
-	if len(m.Entrypoints) == 0 {
-		return nil
-	}
 	issues := []string{}
-	distinct := map[string]bool{}
-	for agent, entrypoint := range m.Entrypoints {
-		if entrypoint.EffectiveMode() != "managed" {
-			issues = append(issues, fmt.Sprintf("entrypoint %q uses unsupported mode %q", agent, entrypoint.Mode))
-			continue
+
+	agents := entrypointAgents(m)
+	sourceAbs := filepath.Join(root, manifest.CanonicalEntrypointSourceFile())
+	sourceExists := false
+	if len(agents) > 0 {
+		switch state, err := readManagedEntrypointState(sourceAbs); {
+		case errors.Is(err, os.ErrNotExist):
+			// Source file was never created — skip further entrypoint checks.
+			// Run `ctxpm entrypoint sync` to create it.
+		case err != nil:
+			issues = append(issues, err.Error())
+		case !state.HasManagedBlock:
+			sourceExists = true
+			issues = append(issues, fmt.Sprintf("managed entrypoint %q does not contain a ctxpm managed block", manifest.CanonicalEntrypointFile()))
+		case state.Damaged:
+			sourceExists = true
+			issues = append(issues, fmt.Sprintf("managed entrypoint %q has a damaged ctxpm managed block", manifest.CanonicalEntrypointFile()))
+		case strings.TrimRight(state.Block, "\n") != strings.TrimRight(manifest.ManagedEntrypoint(), "\n"):
+			sourceExists = true
+			issues = append(issues, fmt.Sprintf("managed entrypoint %q is out of date; run `ctxpm entrypoint sync`", manifest.CanonicalEntrypointFile()))
+		default:
+			sourceExists = true
 		}
-		distinct[entrypoint.File] = true
-		if entrypoint.File != manifest.CanonicalEntrypointFile() {
-			issues = append(issues, fmt.Sprintf("entrypoint %q should use shared canonical file %q, found %q", agent, manifest.CanonicalEntrypointFile(), entrypoint.File))
-		}
-	}
-	if len(distinct) > 1 {
-		files := make([]string, 0, len(distinct))
-		for file := range distinct {
-			files = append(files, file)
-		}
-		sort.Strings(files)
-		issues = append(issues, "multiple managed entrypoint files are configured: "+strings.Join(files, ", "))
 	}
 
-	canonicalAbs := filepath.Join(root, manifest.CanonicalEntrypointFile())
-	switch state, err := readManagedEntrypointState(canonicalAbs); {
-	case errors.Is(err, os.ErrNotExist):
-		issues = append(issues, fmt.Sprintf("managed entrypoint %q is missing", manifest.CanonicalEntrypointFile()))
-	case err != nil:
-		issues = append(issues, err.Error())
-	case !state.HasManagedBlock:
-		issues = append(issues, fmt.Sprintf("managed entrypoint %q does not contain a ctxpm managed block", manifest.CanonicalEntrypointFile()))
-	case state.Damaged:
-		issues = append(issues, fmt.Sprintf("managed entrypoint %q has a damaged ctxpm managed block", manifest.CanonicalEntrypointFile()))
-	case strings.TrimRight(state.Block, "\n") != strings.TrimRight(manifest.ManagedEntrypoint(), "\n"):
-		issues = append(issues, fmt.Sprintf("managed entrypoint %q is out of date; run `ctxpm entrypoint sync`", manifest.CanonicalEntrypointFile()))
-	}
-
-	for _, agent := range entrypointAgents(m) {
-		alias := manifest.EntrypointFile(agent)
-		if alias == "" || alias == manifest.CanonicalEntrypointFile() {
-			continue
-		}
-		aliasAbs := filepath.Join(root, alias)
-		relTarget, _ := filepath.Rel(filepath.Dir(aliasAbs), canonicalAbs)
-		current, err := os.Readlink(aliasAbs)
-		if err == nil {
-			if current != relTarget {
-				issues = append(issues, fmt.Sprintf("entrypoint alias %q points to %q instead of %q", alias, current, relTarget))
+	// Validate all root-level entrypoint symlinks only when the source file exists.
+	// When source is absent (never synced), aliases can't point anywhere yet.
+	if sourceExists {
+		validateAlias := func(alias string) {
+			aliasAbs := filepath.Join(root, alias)
+			relTarget, _ := filepath.Rel(filepath.Dir(aliasAbs), sourceAbs)
+			current, err := os.Readlink(aliasAbs)
+			if err == nil {
+				if current != relTarget {
+					issues = append(issues, fmt.Sprintf("entrypoint alias %q points to %q instead of %q", alias, current, relTarget))
+				}
+				return
 			}
-			continue
+			if errors.Is(err, os.ErrNotExist) {
+				issues = append(issues, fmt.Sprintf("entrypoint alias %q is missing", alias))
+				return
+			}
+			if _, statErr := os.Lstat(aliasAbs); statErr == nil {
+				issues = append(issues, entrypointMergeGuidance([]string{alias}))
+				return
+			}
+			issues = append(issues, fmt.Sprintf("entrypoint alias %q could not be inspected: %v", alias, err))
 		}
-		if errors.Is(err, os.ErrNotExist) {
-			issues = append(issues, fmt.Sprintf("entrypoint alias %q is missing", alias))
-			continue
+
+		validateAlias(manifest.CanonicalEntrypointFile())
+		for _, agent := range agents {
+			alias := manifest.EntrypointFile(agent)
+			if alias == "" || alias == manifest.CanonicalEntrypointFile() {
+				continue
+			}
+			validateAlias(alias)
 		}
-		if _, statErr := os.Lstat(aliasAbs); statErr == nil {
-			issues = append(issues, entrypointMergeGuidance([]string{alias}))
-			continue
-		}
-		issues = append(issues, fmt.Sprintf("entrypoint alias %q could not be inspected: %v", alias, err))
 	}
 	return dedupe(issues)
 }
@@ -245,11 +207,6 @@ func validateManagedEntrypoints(root string, m *manifest.Manifest) []string {
 func entrypointAgents(m *manifest.Manifest) []string {
 	seen := map[string]bool{}
 	for _, agent := range m.Agents {
-		if trimmed := strings.TrimSpace(agent); trimmed != "" {
-			seen[trimmed] = true
-		}
-	}
-	for agent := range m.Entrypoints {
 		if trimmed := strings.TrimSpace(agent); trimmed != "" {
 			seen[trimmed] = true
 		}
@@ -263,13 +220,15 @@ func entrypointAgents(m *manifest.Manifest) []string {
 }
 
 func entrypointGitignoreRules(m *manifest.Manifest) []string {
-	rules := []string{}
+	// Always gitignore the root AGENTS.md symlink; the source lives in .ctxpm/AGENTS.md.
+	// Use a leading "/" so the rule matches only the project root, not .ctxpm/AGENTS.md.
+	rules := []string{"/" + manifest.CanonicalEntrypointFile()}
 	for _, agent := range entrypointAgents(m) {
 		file := manifest.EntrypointFile(agent)
 		if file == "" || file == manifest.CanonicalEntrypointFile() {
 			continue
 		}
-		rules = append(rules, file)
+		rules = append(rules, "/"+file)
 	}
 	return dedupe(rules)
 }
@@ -285,19 +244,30 @@ func entrypointMergeGuidance(files []string) string {
 }
 
 func seedCanonicalEntrypoint(root string, m *manifest.Manifest) error {
-	canonical := filepath.Join(root, manifest.CanonicalEntrypointFile())
-	if _, err := os.Lstat(canonical); err == nil {
+	sourceAbs := filepath.Join(root, manifest.CanonicalEntrypointSourceFile())
+	if _, err := os.Lstat(sourceAbs); err == nil {
 		return nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 
-	candidates := []string{}
+	if err := os.MkdirAll(filepath.Dir(sourceAbs), 0o755); err != nil {
+		return err
+	}
+
+	// Collect all real (non-symlink) root-level entrypoint files as migration candidates,
+	// including AGENTS.md itself (which was the canonical file before this change).
+	candidateFiles := []string{manifest.CanonicalEntrypointFile()}
 	for _, agent := range entrypointAgents(m) {
 		file := manifest.EntrypointFile(agent)
 		if file == "" || file == manifest.CanonicalEntrypointFile() {
 			continue
 		}
+		candidateFiles = append(candidateFiles, file)
+	}
+
+	candidates := []string{}
+	for _, file := range dedupe(candidateFiles) {
 		abs := filepath.Join(root, file)
 		info, err := os.Lstat(abs)
 		if errors.Is(err, os.ErrNotExist) {
@@ -322,7 +292,7 @@ func seedCanonicalEntrypoint(root string, m *manifest.Manifest) error {
 		}
 		return errors.New(entrypointMergeGuidance(labels))
 	}
-	return os.Rename(candidates[0], canonical)
+	return os.Rename(candidates[0], sourceAbs)
 }
 
 func ensureEntrypointAlias(aliasPath, canonicalPath string) error {
@@ -410,4 +380,57 @@ func managedEntrypointEnvelope(content string) (string, string, bool) {
 		return "", "", false
 	}
 	return content[:start], content[endIndex:], true
+}
+
+// stageEntrypointMigration detects when AGENTS.md was just migrated from a
+// tracked root file to a symlink pointing at .ctxpm/AGENTS.md and automatically
+// applies the corresponding git index operations so the user does not need to
+// run git commands manually. This is best-effort: if git is unavailable or the
+// root is not a git repo the function is a no-op.
+//
+// Operations performed:
+//   - git rm --cached AGENTS.md  (when index has it as a regular file but disk has a symlink)
+//   - git add .ctxpm/AGENTS.md   (when the source file is not yet in the index)
+//   - git add .gitignore          (when .gitignore has unstaged modifications)
+func stageEntrypointMigration(root string) []string {
+	ctx := context.Background()
+	if _, err := runGit(ctx, "-C", root, "rev-parse", "--git-dir"); err != nil {
+		return nil
+	}
+
+	var staged []string
+	canonical := manifest.CanonicalEntrypointFile()
+	source := manifest.CanonicalEntrypointSourceFile()
+
+	// If AGENTS.md is tracked in the git index as a regular file (mode 100644)
+	// but is now a symlink on disk, remove it from the index.
+	lsOut, err := runGit(ctx, "-C", root, "ls-files", "--stage", "--", canonical)
+	if err == nil && strings.HasPrefix(lsOut, "100644") {
+		info, statErr := os.Lstat(filepath.Join(root, canonical))
+		if statErr == nil && info.Mode()&os.ModeSymlink != 0 {
+			if _, rmErr := runGit(ctx, "-C", root, "rm", "--cached", "--", canonical); rmErr == nil {
+				staged = append(staged, "git rm --cached "+canonical)
+			}
+		}
+	}
+
+	// If .ctxpm/AGENTS.md exists on disk but is not yet in the git index, stage it.
+	lsOut, err = runGit(ctx, "-C", root, "ls-files", "--", source)
+	if err == nil && strings.TrimSpace(lsOut) == "" {
+		if _, statErr := os.Lstat(filepath.Join(root, source)); statErr == nil {
+			if _, addErr := runGit(ctx, "-C", root, "add", "--", source); addErr == nil {
+				staged = append(staged, "git add "+source)
+			}
+		}
+	}
+
+	// Stage .gitignore if it has unstaged changes.
+	diffOut, err := runGit(ctx, "-C", root, "diff", "--name-only", "--", ".gitignore")
+	if err == nil && strings.TrimSpace(diffOut) != "" {
+		if _, addErr := runGit(ctx, "-C", root, "add", "--", ".gitignore"); addErr == nil {
+			staged = append(staged, "git add .gitignore")
+		}
+	}
+
+	return staged
 }

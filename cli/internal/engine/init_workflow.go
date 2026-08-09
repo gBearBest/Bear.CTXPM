@@ -19,6 +19,7 @@ type initDiscovery struct {
 }
 
 type initResourcePlan struct {
+	agents            []string
 	packages          []manifest.Resource
 	dependencies      []manifest.Resource
 	migrated          []string
@@ -67,8 +68,13 @@ func detectInitAgent(root string, requested string, m *manifest.Manifest) initDi
 	}{
 		{agent: "claude-code", file: "CLAUDE.md"},
 		{agent: "antigravity", file: "ANTIGRAVITY.md"},
+		{agent: "gemini-cli", file: "GEMINI.md"},
+		{agent: "generic", file: manifest.CanonicalEntrypointSourceFile()},
 		{agent: "generic", file: "AGENTS.md"},
 	} {
+		if _, alreadySeen := existing[candidate.agent]; alreadySeen {
+			continue
+		}
 		if _, err := os.Stat(filepath.Join(root, candidate.file)); err == nil {
 			existing[candidate.agent] = candidate.file
 		}
@@ -106,11 +112,6 @@ func detectAgentFromManifest(m *manifest.Manifest) string {
 	if m == nil {
 		return ""
 	}
-	if len(m.Entrypoints) == 1 {
-		for agent := range m.Entrypoints {
-			return agent
-		}
-	}
 	if len(m.Agents) == 1 {
 		return m.Agents[0]
 	}
@@ -118,7 +119,7 @@ func detectAgentFromManifest(m *manifest.Manifest) string {
 }
 
 func scanAndMigrateResources(root string, m *manifest.Manifest, projectName string, dryRun bool) (*initResourcePlan, error) {
-	plan := &initResourcePlan{}
+	plan := &initResourcePlan{agents: m.Agents}
 	topLevelEntries, err := listTopLevelEntries(root)
 	if err != nil {
 		return nil, err
@@ -129,10 +130,6 @@ func scanAndMigrateResources(root string, m *manifest.Manifest, projectName stri
 		return nil, err
 	}
 	for _, candidate := range candidates {
-		candidate.resource.Compatibility = compatibilityPaths(m.Agents, candidate.resource)
-		if candidate.requiresMigration {
-			candidate.resource.Compatibility = dedupe(append(candidate.resource.Compatibility, candidate.original))
-		}
 		if m.HasResource(candidate.resource.Name) {
 			if candidate.requiresMigration {
 				plan.unresolved = append(plan.unresolved, fmt.Sprintf("%s (%s): resource name already exists in ctxpm.yaml", candidate.original, candidate.resource.Name))
@@ -156,13 +153,27 @@ func scanAndMigrateResources(root string, m *manifest.Manifest, projectName stri
 			plan.unresolved = append(plan.unresolved, fmt.Sprintf("%s: canonical resource is invalid: %v", candidate.original, err))
 			continue
 		}
-		if err := ensureCompatibility(root, candidate.resource); err != nil {
+		if err := ensureCompatibility(root, m.Agents, candidate.resource); err != nil {
 			plan.unresolved = append(plan.unresolved, fmt.Sprintf("%s: compatibility setup failed: %v", candidate.original, err))
 			continue
 		}
+		// For migrated resources, also create a one-time transitional symlink at the original
+		// path if it is not already covered by a derived compatibility path.
+		if candidate.requiresMigration && candidate.original != "" {
+			derived := manifest.DerivedCompatibilityPaths(m.Agents, candidate.resource)
+			if !containsString(derived, candidate.original) {
+				originalAbs := filepath.Join(root, filepath.FromSlash(candidate.original))
+				targetAbs := filepath.Join(root, filepath.FromSlash(candidate.resource.Path))
+				if err := os.MkdirAll(filepath.Dir(originalAbs), 0o755); err == nil {
+					if relTarget, err := filepath.Rel(filepath.Dir(originalAbs), targetAbs); err == nil {
+						_ = createSymlinkIfAbsent(originalAbs, relTarget)
+					}
+				}
+			}
+		}
 		plan.recordCandidate(candidate, candidate.requiresMigration)
 		plan.files = append(plan.files, filepath.Join(root, filepath.FromSlash(candidate.resource.Path)))
-		for _, compat := range candidate.resource.Compatibility {
+		for _, compat := range manifest.DerivedCompatibilityPaths(m.Agents, candidate.resource) {
 			plan.files = append(plan.files, filepath.Join(root, filepath.FromSlash(compat)))
 		}
 	}
@@ -200,8 +211,6 @@ func collectMigrationCandidates(root string, m *manifest.Manifest, projectName s
 			plan.unresolved = append(plan.unresolved, fmt.Sprintf("%s: canonical path %s already exists", candidate.original, candidate.resource.Path))
 			continue
 		}
-		candidate.resource.Compatibility = compatibilityPaths(m.Agents, candidate.resource)
-		candidate.resource.Compatibility = dedupe(append(candidate.resource.Compatibility, candidate.original))
 		plan.candidates = append(plan.candidates, candidate)
 	}
 	sortDiscoveredResources(plan.candidates)
@@ -220,7 +229,7 @@ func (p *initResourcePlan) recordCandidate(candidate discoveredResource, migrate
 		p.migrated = append(p.migrated, candidate.original)
 	}
 	p.ownershipInferred = append(p.ownershipInferred, fmt.Sprintf("%s -> %s (%s)", candidate.original, candidate.kind, strings.Join(candidate.evidence, "; ")))
-	p.gitignoreRules = append(p.gitignoreRules, compatibilityIgnoreRules(candidate.resource)...)
+	p.gitignoreRules = append(p.gitignoreRules, compatibilityIgnoreRules(p.agents, candidate.resource)...)
 }
 
 func discoverInitResources(root string, projectHints []string) ([]discoveredResource, error) {
@@ -269,7 +278,7 @@ func discoverInitResources(root string, projectHints []string) ([]discoveredReso
 
 func discoverCompatibilityResources(root string, projectHints []string) ([]discoveredResource, error) {
 	candidates := []discoveredResource{}
-	for _, relDir := range []string{".agents", ".claude", ".antigravity"} {
+	for _, relDir := range []string{".agents", ".claude", ".antigravity", ".gemini", ".cursor", ".windsurf", ".kiro"} {
 		for _, resourceType := range manifest.SupportedTypes() {
 			discovered, err := discoverTypedResourceDir(root, filepath.ToSlash(filepath.Join(relDir, manifest.TypeDir(resourceType))), resourceType, true, projectHints, true, true)
 			if err != nil {
@@ -567,17 +576,35 @@ func listTopLevelEntries(root string) ([]string, error) {
 	return values, nil
 }
 
-func compatibilityIgnoreRules(resource manifest.Resource) []string {
+func compatibilityIgnoreRules(agents []string, resource manifest.Resource) []string {
 	rules := []string{}
-	for _, compat := range resource.Compatibility {
+	for _, compat := range manifest.DerivedCompatibilityPaths(agents, resource) {
 		switch {
-		case strings.HasPrefix(compat, ".agents/"), strings.HasPrefix(compat, ".claude/"), strings.HasPrefix(compat, ".antigravity/"):
+		case strings.HasPrefix(compat, ".agents/"), strings.HasPrefix(compat, ".claude/"), strings.HasPrefix(compat, ".antigravity/"),
+			strings.HasPrefix(compat, ".gemini/"), strings.HasPrefix(compat, ".cursor/"),
+			strings.HasPrefix(compat, ".windsurf/"), strings.HasPrefix(compat, ".kiro/"):
 			rules = append(rules, filepath.ToSlash(filepath.Dir(compat))+"/")
 		default:
 			rules = append(rules, compat)
 		}
 	}
 	return dedupe(rules)
+}
+
+func containsString(slice []string, s string) bool {
+	for _, v := range slice {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+func createSymlinkIfAbsent(linkPath, relTarget string) error {
+	if _, err := os.Lstat(linkPath); err == nil {
+		return nil
+	}
+	return os.Symlink(relTarget, linkPath)
 }
 
 func moveResourceToCanonical(root, fromRel, toRel string) error {
@@ -606,14 +633,22 @@ func ignoredInitPath(rel string) bool {
 	return strings.HasPrefix(rel, ".ctxpm/") ||
 		strings.HasPrefix(rel, ".agents/") ||
 		strings.HasPrefix(rel, ".claude/") ||
-		strings.HasPrefix(rel, ".antigravity/")
+		strings.HasPrefix(rel, ".antigravity/") ||
+		strings.HasPrefix(rel, ".gemini/") ||
+		strings.HasPrefix(rel, ".cursor/") ||
+		strings.HasPrefix(rel, ".windsurf/") ||
+		strings.HasPrefix(rel, ".kiro/")
 }
 
 func compatibilityDiscoveryPath(rel string) bool {
 	rel = filepath.ToSlash(rel)
 	return strings.HasPrefix(rel, ".agents/") ||
 		strings.HasPrefix(rel, ".claude/") ||
-		strings.HasPrefix(rel, ".antigravity/")
+		strings.HasPrefix(rel, ".antigravity/") ||
+		strings.HasPrefix(rel, ".gemini/") ||
+		strings.HasPrefix(rel, ".cursor/") ||
+		strings.HasPrefix(rel, ".windsurf/") ||
+		strings.HasPrefix(rel, ".kiro/")
 }
 
 func resourcePathExists(root, resourcePath string) bool {

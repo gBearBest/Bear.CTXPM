@@ -60,6 +60,7 @@ type InitResult struct {
 	DependenciesCreated        []string `json:"dependencies_created,omitempty"`
 	MigratedResources          []string `json:"migrated_resources,omitempty"`
 	GitignoreUpdated           bool     `json:"gitignore_updated"`
+	GitStaged                  []string `json:"git_staged,omitempty"`
 	OwnershipConfirmed         []string `json:"ownership_confirmed,omitempty"`
 	OwnershipInferred          []string `json:"ownership_inferred,omitempty"`
 	UnresolvedResources        []string `json:"unresolved_resources,omitempty"`
@@ -121,6 +122,9 @@ func (r InitResult) Text() string {
 			lines = append(lines, "- "+item)
 		}
 	}
+	for _, item := range r.GitStaged {
+		lines = append(lines, "git staged: "+item)
+	}
 	lines = append(lines, "Files touched:")
 	for _, item := range r.Files {
 		lines = append(lines, "- "+item)
@@ -155,12 +159,6 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 			UpdatePolicy: manifest.DefaultPolicy(),
 			Dependencies: []manifest.Resource{},
 			Packages:     []manifest.Resource{},
-			Entrypoints: map[string]manifest.Entrypoint{
-				opts.Agent: {
-					File: manifest.CanonicalEntrypointFile(),
-					Mode: "managed",
-				},
-			},
 		}
 	}
 
@@ -172,11 +170,6 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 	}
 	m.Agents = filterEmptyStrings(m.Agents)
 	m.Agents = appendIfMissing(m.Agents, opts.Agent)
-	if m.Entrypoints == nil {
-		m.Entrypoints = map[string]manifest.Entrypoint{}
-	}
-	delete(m.Entrypoints, "")
-	m.Entrypoints[opts.Agent] = manifest.Entrypoint{File: manifest.CanonicalEntrypointFile(), Mode: "managed"}
 	normalizeSharedEntrypoints(m)
 	if m.UpdatePolicy.Enabled == nil && strings.TrimSpace(m.UpdatePolicy.Interval) == "" && m.UpdatePolicy.IncludeSelf == nil {
 		m.UpdatePolicy = manifest.DefaultPolicy()
@@ -220,14 +213,16 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 	sortResources(m.Packages)
 	sortResources(m.Dependencies)
 
-	entrypointFile := filepath.Join(a.Root, manifest.CanonicalEntrypointFile())
+	entrypointFile := filepath.Join(a.Root, manifest.CanonicalEntrypointSourceFile())
 	files = append(files, entrypointFile)
+	var gitStaged []string
 	if !opts.DryRun {
 		entrypointFiles, err := syncManagedEntrypoints(a.Root, m, opts.Force)
 		if err != nil {
 			return nil, err
 		}
 		files = append(files, entrypointFiles...)
+		gitStaged = stageEntrypointMigration(a.Root)
 	}
 
 	ctxpmResource := bundledCtxpmResource(m.Agents)
@@ -254,9 +249,9 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 
 		gitignoreRules := dedupe(append(
 			[]string{".ctxpm/dependencies/", ".ctxpm/state/"},
-			compatibilityGitignoreRules(m.Dependencies)...,
+			compatibilityGitignoreRules(m.Agents, m.Dependencies)...,
 		))
-		gitignoreRules = dedupe(append(gitignoreRules, compatibilityGitignoreRules(m.Packages)...))
+		gitignoreRules = dedupe(append(gitignoreRules, compatibilityGitignoreRules(m.Agents, m.Packages)...))
 		gitignoreRules = dedupe(append(gitignoreRules, entrypointGitignoreRules(m)...))
 		updated, err := ensureGitignoreRules(gitignorePath, gitignoreRules)
 		if err != nil {
@@ -284,11 +279,12 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 		DependenciesCreated:        dedupe(append(resourceNames(resourcePlan.dependencies), "ctxpm")),
 		MigratedResources:          resourcePlan.migrated,
 		GitignoreUpdated:           gitignoreUpdated,
+		GitStaged:                  gitStaged,
 		OwnershipConfirmed:         nil,
 		OwnershipInferred:          dedupe(append(discovery.evidence, resourcePlan.ownershipInferred...)),
 		UnresolvedResources:        dedupe(resourcePlan.unresolved),
 		CtxpmDependencyStatus:      ctxpmStatus,
-		CtxpmCompatibilityComplete: len(ctxpmResource.Compatibility) > 0,
+		CtxpmCompatibilityComplete: len(manifest.DerivedCompatibilityPaths(m.Agents, ctxpmResource)) > 0,
 		ManagedEntrypointUpdated:   true,
 		CtxpmYAMLStatus:            ctxpmYAMLStatus,
 		LocalCLIStatus:             localCLIStatus,
@@ -348,10 +344,9 @@ func (a *App) Add(ctx context.Context, opts AddOptions) (*AddResult, error) {
 	if m.HasResource(detected.Name) {
 		return nil, fmt.Errorf("resource %q already exists in ctxpm.yaml", detected.Name)
 	}
-	detected.Resource.Compatibility = compatibilityPaths(m.Agents, detected.Resource)
 
 	if !opts.DryRun {
-		installed, err := a.installResource(ctx, &detected.Resource, "")
+		installed, err := a.installResource(ctx, m.Agents, &detected.Resource, "")
 		if err != nil {
 			return nil, err
 		}
@@ -431,7 +426,7 @@ func (a *App) List(opts ListOptions) (*ListResult, error) {
 			Type:    resource.Type,
 			Path:    resource.Path,
 			Version: resource.Version,
-			Status:  localStatus(a.Root, resource),
+			Status:  localStatus(a.Root, m.Agents, resource),
 		}
 		if resource.Source != nil {
 			item.SourceType = resource.Source.NormalizedType()
@@ -485,7 +480,7 @@ func (a *App) Validate() (*ValidateResult, error) {
 			issues = append(issues, err.Error())
 		}
 		issues = append(issues, validateMemoryResource(abs, dep)...)
-		for _, compat := range dep.Compatibility {
+		for _, compat := range manifest.DerivedCompatibilityPaths(m.Agents, dep) {
 			compatAbs := filepath.Join(a.Root, filepath.FromSlash(compat))
 			if _, err := os.Lstat(compatAbs); err != nil {
 				issues = append(issues, fmt.Sprintf("compatibility path %q is missing", compat))
@@ -498,7 +493,7 @@ func (a *App) Validate() (*ValidateResult, error) {
 			issues = append(issues, err.Error())
 		}
 		issues = append(issues, validateMemoryResource(abs, pkg)...)
-		for _, compat := range pkg.Compatibility {
+		for _, compat := range manifest.DerivedCompatibilityPaths(m.Agents, pkg) {
 			compatAbs := filepath.Join(a.Root, filepath.FromSlash(compat))
 			if _, err := os.Lstat(compatAbs); err != nil {
 				issues = append(issues, fmt.Sprintf("compatibility path %q is missing", compat))
@@ -558,7 +553,6 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 		if m.HasResource(candidate.resource.Name) {
 			continue
 		}
-		candidate.resource.Compatibility = compatibilityPaths(m.Agents, candidate.resource)
 		switch candidate.kind {
 		case "dependency":
 			m.Dependencies = append(m.Dependencies, candidate.resource)
@@ -594,7 +588,7 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 			if err := ensureResourcePresence(a.Root, *dep, "dependency"); err != nil {
 				return nil, err
 			}
-			if err := ensureCompatibility(a.Root, *dep); err != nil {
+			if err := ensureCompatibility(a.Root, m.Agents, *dep); err != nil {
 				return nil, err
 			}
 			actions = append(actions, InstallAction{Kind: "dependency", Name: dep.Name, Status: "linked", Version: dep.Version})
@@ -608,7 +602,7 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 			}
 			continue
 		}
-		installed, err := a.installResource(ctx, dep, dep.Version)
+		installed, err := a.installResource(ctx, m.Agents, dep, dep.Version)
 		if err != nil {
 			return nil, err
 		}
@@ -642,7 +636,7 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 		if err := ensureResourcePresence(a.Root, *pkg, "package"); err != nil {
 			return nil, err
 		}
-		if err := ensureCompatibility(a.Root, *pkg); err != nil {
+		if err := ensureCompatibility(a.Root, m.Agents, *pkg); err != nil {
 			return nil, err
 		}
 		actions = append(actions, InstallAction{Kind: "package", Name: pkg.Name, Status: "linked"})
@@ -665,7 +659,7 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 	if !opts.DryRun && (len(installedResources) > 0 || len(entrypointGitignoreRules(m)) > 0) {
 		gitignoreRules := dedupe(append(
 			[]string{".ctxpm/dependencies/", ".ctxpm/state/"},
-			compatibilityGitignoreRules(installedResources)...,
+			compatibilityGitignoreRules(m.Agents, installedResources)...,
 		))
 		gitignoreRules = dedupe(append(gitignoreRules, entrypointGitignoreRules(m)...))
 		if _, err := ensureGitignoreRules(filepath.Join(a.Root, ".gitignore"), gitignoreRules); err != nil {
@@ -773,7 +767,7 @@ func (a *App) CheckUpdates(ctx context.Context, opts CheckUpdatesOptions) (*Chec
 				CurrentVersion: dep.Version,
 				Status:         "unresolved",
 				Reason:         err.Error(),
-				Compatibility:  dep.Compatibility,
+				Compatibility:  manifest.DerivedCompatibilityPaths(m.Agents, dep),
 			})
 			continue
 		}
@@ -789,7 +783,7 @@ func (a *App) CheckUpdates(ctx context.Context, opts CheckUpdatesOptions) (*Chec
 			CurrentVersion: dep.Version,
 			LatestVersion:  version,
 			Status:         status,
-			Compatibility:  dep.Compatibility,
+			Compatibility:  manifest.DerivedCompatibilityPaths(m.Agents, dep),
 		})
 	}
 	result := &CheckUpdatesResult{
@@ -897,7 +891,7 @@ func (a *App) Update(ctx context.Context, opts UpdateOptions) (*UpdateResult, er
 				})
 				continue
 			}
-			installed, err := a.installResource(ctx, dep, updateInfo.LatestVersion)
+			installed, err := a.installResource(ctx, m.Agents, dep, updateInfo.LatestVersion)
 			if err != nil {
 				return nil, err
 			}
@@ -921,7 +915,7 @@ func (a *App) Update(ctx context.Context, opts UpdateOptions) (*UpdateResult, er
 			return nil, err
 		}
 	}
-	if !opts.DryRun && (len(versionUpdates) > 0 || len(m.Entrypoints) > 0) {
+	if !opts.DryRun && len(versionUpdates) > 0 {
 		if _, err := manifest.Save(a.Root, m); err != nil {
 			return nil, err
 		}
@@ -967,7 +961,7 @@ func (a *App) Remove(opts RemoveOptions) (*RemoveResult, error) {
 			continue
 		}
 		if opts.DeleteFiles {
-			if err := removePaths(a.Root, dep); err != nil {
+			if err := removePaths(a.Root, m.Agents, dep); err != nil {
 				return nil, err
 			}
 		}
@@ -981,7 +975,7 @@ func (a *App) Remove(opts RemoveOptions) (*RemoveResult, error) {
 			continue
 		}
 		if opts.DeleteFiles {
-			if err := removePaths(a.Root, pkg); err != nil {
+			if err := removePaths(a.Root, m.Agents, pkg); err != nil {
 				return nil, err
 			}
 		}
@@ -1051,7 +1045,7 @@ func (a *App) Detect() (*DetectResult, error) {
 		Unresolved:   plan.unresolved,
 	}
 	for _, candidate := range plan.candidates {
-		result.Candidates = append(result.Candidates, migrationCandidateToResult(candidate))
+		result.Candidates = append(result.Candidates, migrationCandidateToResult(m.Agents, candidate))
 	}
 	if len(result.Candidates) > 0 {
 		result.Status = "migration_candidates_found"
@@ -1190,7 +1184,7 @@ func (a *App) Migrate(opts MigrateOptions) (*MigrateResult, error) {
 			result.Skipped = append(result.Skipped, action)
 			continue
 		}
-		if err := ensureCompatibility(a.Root, candidate.resource); err != nil {
+		if err := ensureCompatibility(a.Root, m.Agents, candidate.resource); err != nil {
 			return nil, err
 		}
 		switch candidate.kind {
@@ -1201,7 +1195,7 @@ func (a *App) Migrate(opts MigrateOptions) (*MigrateResult, error) {
 		}
 		migratedResources = append(migratedResources, candidate.resource)
 		files = append(files, filepath.Join(a.Root, filepath.FromSlash(candidate.resource.Path)))
-		for _, compat := range candidate.resource.Compatibility {
+		for _, compat := range manifest.DerivedCompatibilityPaths(m.Agents, candidate.resource) {
 			files = append(files, filepath.Join(a.Root, filepath.FromSlash(compat)))
 		}
 		action.Status = "migrated"
@@ -1215,7 +1209,7 @@ func (a *App) Migrate(opts MigrateOptions) (*MigrateResult, error) {
 		}
 		gitignoreRules := dedupe(append(
 			[]string{".ctxpm/dependencies/", ".ctxpm/state/"},
-			compatibilityGitignoreRules(migratedResources)...,
+			compatibilityGitignoreRules(m.Agents, migratedResources)...,
 		))
 		if _, err := ensureGitignoreRules(filepath.Join(a.Root, ".gitignore"), gitignoreRules); err != nil {
 			return nil, err
@@ -1238,14 +1232,27 @@ func (a *App) Migrate(opts MigrateOptions) (*MigrateResult, error) {
 	return result, nil
 }
 
-func migrationCandidateToResult(candidate discoveredResource) MigrationCandidate {
+func migrationCandidateToResult(agents []string, candidate discoveredResource) MigrationCandidate {
+	derived := manifest.DerivedCompatibilityPaths(agents, candidate.resource)
+	compatPaths := append([]string(nil), derived...)
+	// Include the original path if it's not already in the derived set (transitional symlink).
+	inDerived := false
+	for _, p := range derived {
+		if p == candidate.original {
+			inDerived = true
+			break
+		}
+	}
+	if !inDerived && candidate.original != "" {
+		compatPaths = append(compatPaths, candidate.original)
+	}
 	return MigrationCandidate{
 		Kind:              candidate.kind,
 		Name:              candidate.resource.Name,
 		Type:              candidate.resource.Type,
 		OriginalPath:      candidate.original,
 		CanonicalPath:     candidate.resource.Path,
-		Compatibility:     append([]string(nil), candidate.resource.Compatibility...),
+		Compatibility:     compatPaths,
 		Evidence:          append([]string(nil), candidate.evidence...),
 		RequiresMigration: candidate.requiresMigration,
 	}
@@ -1298,7 +1305,7 @@ type installOutcome struct {
 	Version string
 }
 
-func (a *App) installResource(ctx context.Context, resource *manifest.Resource, versionOverride string) (*installOutcome, error) {
+func (a *App) installResource(ctx context.Context, agents []string, resource *manifest.Resource, versionOverride string) (*installOutcome, error) {
 	resolved, err := a.resolveResource(ctx, *resource, resolveOptions{
 		VersionOverride:    versionOverride,
 		UseRecordedVersion: versionOverride == "",
@@ -1311,7 +1318,7 @@ func (a *App) installResource(ctx context.Context, resource *manifest.Resource, 
 	if err := replacePath(resolved.LocalPath, destination); err != nil {
 		return nil, err
 	}
-	if err := ensureCompatibility(a.Root, *resource); err != nil {
+	if err := ensureCompatibility(a.Root, agents, *resource); err != nil {
 		return nil, err
 	}
 	return &installOutcome{Status: "installed", Version: resolved.Version}, nil
@@ -1352,8 +1359,8 @@ func runGit(ctx context.Context, args ...string) (string, error) {
 	return string(output), nil
 }
 
-func ensureCompatibility(root string, resource manifest.Resource) error {
-	for _, compat := range resource.Compatibility {
+func ensureCompatibility(root string, agents []string, resource manifest.Resource) error {
+	for _, compat := range manifest.DerivedCompatibilityPaths(agents, resource) {
 		linkPath := filepath.Join(root, filepath.FromSlash(compat))
 		targetPath := filepath.Join(root, filepath.FromSlash(resource.Path))
 		if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
@@ -1450,32 +1457,11 @@ func copyFile(sourcePath, destination string, mode os.FileMode) error {
 	return err
 }
 
-func compatibilityPaths(agents []string, resource manifest.Resource) []string {
-	paths := []string{}
-	dir := manifest.TypeDir(resource.Type)
-	leaf := pathLeaf(resource.Path)
-	for _, agent := range agents {
-		switch agent {
-		case "codex", "generic":
-			paths = append(paths, filepath.ToSlash(filepath.Join(".agents", dir, leaf)))
-		case "claude-code":
-			paths = append(paths, filepath.ToSlash(filepath.Join(".claude", dir, leaf)))
-		case "antigravity":
-			paths = append(paths, filepath.ToSlash(filepath.Join(".antigravity", dir, leaf)))
-		}
-	}
-	return dedupe(paths)
-}
-
-func pathLeaf(resourcePath string) string {
-	return filepath.Base(filepath.FromSlash(resourcePath))
-}
-
-func localStatus(root string, resource manifest.Resource) string {
+func localStatus(root string, agents []string, resource manifest.Resource) string {
 	if err := validateResolvedResource(filepath.Join(root, filepath.FromSlash(resource.Path)), resource); err != nil {
 		return "missing"
 	}
-	for _, compat := range resource.Compatibility {
+	for _, compat := range manifest.DerivedCompatibilityPaths(agents, resource) {
 		if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(compat))); err != nil {
 			return "drifted"
 		}
@@ -1497,8 +1483,8 @@ func sortResources(resources []manifest.Resource) {
 	sort.Slice(resources, func(i, j int) bool { return resources[i].Name < resources[j].Name })
 }
 
-func removePaths(root string, resource manifest.Resource) error {
-	for _, compat := range resource.Compatibility {
+func removePaths(root string, agents []string, resource manifest.Resource) error {
+	for _, compat := range manifest.DerivedCompatibilityPaths(agents, resource) {
 		if err := os.RemoveAll(filepath.Join(root, filepath.FromSlash(compat))); err != nil {
 			return err
 		}
@@ -1533,10 +1519,10 @@ func ensureGitignoreRules(path string, rules []string) (bool, error) {
 	return updated, os.WriteFile(path, []byte(builder.String()), 0o644)
 }
 
-func compatibilityGitignoreRules(resources []manifest.Resource) []string {
+func compatibilityGitignoreRules(agents []string, resources []manifest.Resource) []string {
 	rules := []string{}
 	for _, resource := range resources {
-		rules = append(rules, compatibilityIgnoreRules(resource)...)
+		rules = append(rules, compatibilityIgnoreRules(agents, resource)...)
 	}
 	return dedupe(rules)
 }

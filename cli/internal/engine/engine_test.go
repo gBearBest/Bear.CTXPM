@@ -188,9 +188,6 @@ func TestInstallIndexesCanonicalPackageFromCtxpmDirectory(t *testing.T) {
 		if pkg.Path != ".ctxpm/packages/skills/ctxpm-release" {
 			t.Fatalf("package path = %q", pkg.Path)
 		}
-		if !hasString(pkg.Compatibility, ".agents/skills/ctxpm-release") {
-			t.Fatalf("package compatibility = %v", pkg.Compatibility)
-		}
 		break
 	}
 	if !found {
@@ -246,9 +243,6 @@ func TestInstallIndexesCanonicalDependencyFromCtxpmDirectory(t *testing.T) {
 		found = true
 		if dep.Path != ".ctxpm/dependencies/rules/shared-rule.md" {
 			t.Fatalf("dependency path = %q", dep.Path)
-		}
-		if !hasString(dep.Compatibility, ".agents/rules/shared-rule.md") {
-			t.Fatalf("dependency compatibility = %v", dep.Compatibility)
 		}
 		break
 	}
@@ -389,7 +383,7 @@ func TestInitDetectsExistingClaudeEntrypointWhenAgentOmitted(t *testing.T) {
 	}
 	if target, err := os.Readlink(filepath.Join(root, "CLAUDE.md")); err != nil {
 		t.Fatalf("Readlink() error = %v", err)
-	} else if target != "AGENTS.md" {
+	} else if target != ".ctxpm/AGENTS.md" {
 		t.Fatalf("CLAUDE.md symlink target = %q", target)
 	}
 }
@@ -444,9 +438,10 @@ func TestInitReplacesManagedBlockOnly(t *testing.T) {
 
 func TestInitReportsDamagedManagedBlockWithoutForce(t *testing.T) {
 	root := t.TempDir()
-	entrypoint := filepath.Join(root, "AGENTS.md")
+	// Write damaged block at root; seedCanonicalEntrypoint will move it to .ctxpm/AGENTS.md.
+	setupPath := filepath.Join(root, "AGENTS.md")
 	original := "Intro\n\n<!-- ctxpm:begin agent=generic -->\noutdated\n"
-	if err := os.WriteFile(entrypoint, []byte(original), 0o644); err != nil {
+	if err := os.WriteFile(setupPath, []byte(original), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -458,7 +453,9 @@ func TestInitReportsDamagedManagedBlockWithoutForce(t *testing.T) {
 	if !strings.Contains(err.Error(), "managed ctxpm block is damaged") {
 		t.Fatalf("Init() error = %v", err)
 	}
-	if got := readFileForTest(t, entrypoint); got != original {
+	// File was moved to .ctxpm/AGENTS.md by seedCanonicalEntrypoint; content must be unchanged.
+	movedPath := filepath.Join(root, ".ctxpm", "AGENTS.md")
+	if got := readFileForTest(t, movedPath); got != original {
 		t.Fatalf("damaged entrypoint should remain unchanged\n--- got ---\n%s\n--- want ---\n%s", got, original)
 	}
 }
@@ -542,16 +539,6 @@ func TestInitForceSyncsAgentsAndCompatibility(t *testing.T) {
 	if !hasString(loaded.Agents, "generic") || !hasString(loaded.Agents, "claude-code") {
 		t.Fatalf("agents = %v", loaded.Agents)
 	}
-	if _, ok := loaded.Entrypoints["claude-code"]; !ok {
-		t.Fatalf("entrypoints = %+v", loaded.Entrypoints)
-	}
-	if loaded.Entrypoints["claude-code"].File != "AGENTS.md" {
-		t.Fatalf("claude entrypoint = %+v", loaded.Entrypoints["claude-code"])
-	}
-	ctxpm := loaded.Dependencies[0]
-	if !hasString(ctxpm.Compatibility, ".agents/skills/ctxpm") || !hasString(ctxpm.Compatibility, ".claude/skills/ctxpm") {
-		t.Fatalf("compatibility = %v", ctxpm.Compatibility)
-	}
 	for _, relative := range []string{".agents/skills/ctxpm", ".claude/skills/ctxpm", "AGENTS.md", "CLAUDE.md"} {
 		if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(relative))); err != nil {
 			t.Fatalf("expected %s to exist: %v", relative, err)
@@ -559,8 +546,111 @@ func TestInitForceSyncsAgentsAndCompatibility(t *testing.T) {
 	}
 	if target, err := os.Readlink(filepath.Join(root, "CLAUDE.md")); err != nil {
 		t.Fatalf("Readlink() error = %v", err)
-	} else if target != "AGENTS.md" {
+	} else if target != ".ctxpm/AGENTS.md" {
 		t.Fatalf("CLAUDE.md symlink target = %q", target)
+	}
+}
+
+func TestInitDetectsGeminiEntrypointWhenAgentOmitted(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "GEMINI.md"), []byte("gemini config\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	app := New(root)
+	result, err := app.Init(InitOptions{})
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	if result.Agent != "gemini-cli" || result.EntrypointFile != "AGENTS.md" {
+		t.Fatalf("Init() result agent=%q entrypoint=%q", result.Agent, result.EntrypointFile)
+	}
+	if target, err := os.Readlink(filepath.Join(root, "GEMINI.md")); err != nil {
+		t.Fatalf("Readlink(GEMINI.md) error = %v", err)
+	} else if target != ".ctxpm/AGENTS.md" {
+		t.Fatalf("GEMINI.md symlink target = %q, want .ctxpm/AGENTS.md", target)
+	}
+}
+
+func TestInitCreatesCompatibilitySymlinksForNewAgents(t *testing.T) {
+	tests := []struct {
+		agent      string
+		entrypoint string
+		compatDir  string
+	}{
+		{agent: "gemini-cli", entrypoint: "GEMINI.md", compatDir: ".gemini"},
+		{agent: "cursor", entrypoint: "AGENTS.md", compatDir: ".cursor"},
+		{agent: "windsurf", entrypoint: "AGENTS.md", compatDir: ".windsurf"},
+		{agent: "kiro", entrypoint: "AGENTS.md", compatDir: ".kiro"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.agent, func(t *testing.T) {
+			root := t.TempDir()
+			app := New(root)
+			if _, err := app.Init(InitOptions{Agent: tt.agent}); err != nil {
+				t.Fatalf("Init() error = %v", err)
+			}
+			loaded, _, err := manifest.Load(root)
+			if err != nil {
+				t.Fatalf("manifest.Load() error = %v", err)
+			}
+			if !hasString(loaded.Agents, tt.agent) {
+				t.Fatalf("agents = %v, want to contain %q", loaded.Agents, tt.agent)
+			}
+			compatPath := filepath.Join(root, tt.compatDir, "skills", "ctxpm")
+			if _, err := os.Lstat(compatPath); err != nil {
+				t.Fatalf("expected %s/skills/ctxpm to exist: %v", tt.compatDir, err)
+			}
+			target, err := os.Readlink(compatPath)
+			if err != nil {
+				t.Fatalf("Readlink(%s/skills/ctxpm) error = %v", tt.compatDir, err)
+			}
+			if target != "../../.ctxpm/dependencies/skills/ctxpm" {
+				t.Fatalf("compat symlink target = %q, want ../../.ctxpm/dependencies/skills/ctxpm", target)
+			}
+			if _, err := os.Lstat(filepath.Join(root, tt.entrypoint)); err != nil {
+				t.Fatalf("expected %s to exist: %v", tt.entrypoint, err)
+			}
+		})
+	}
+}
+
+func TestInitForceSyncsWithGeminiAndCursor(t *testing.T) {
+	root := t.TempDir()
+	app := New(root)
+	if _, err := app.Init(InitOptions{Agent: "generic"}); err != nil {
+		t.Fatalf("Init(generic) error = %v", err)
+	}
+	if _, err := app.Init(InitOptions{Agent: "gemini-cli", Force: true}); err != nil {
+		t.Fatalf("Init(gemini-cli) error = %v", err)
+	}
+	if _, err := app.Init(InitOptions{Agent: "cursor", Force: true}); err != nil {
+		t.Fatalf("Init(cursor) error = %v", err)
+	}
+
+	loaded, _, err := manifest.Load(root)
+	if err != nil {
+		t.Fatalf("manifest.Load() error = %v", err)
+	}
+	for _, agent := range []string{"generic", "gemini-cli", "cursor"} {
+		if !hasString(loaded.Agents, agent) {
+			t.Fatalf("agents = %v, want to contain %q", loaded.Agents, agent)
+		}
+	}
+	for _, relative := range []string{
+		".agents/skills/ctxpm",
+		".gemini/skills/ctxpm",
+		".cursor/skills/ctxpm",
+		"AGENTS.md",
+		"GEMINI.md",
+	} {
+		if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(relative))); err != nil {
+			t.Fatalf("expected %s to exist: %v", relative, err)
+		}
+	}
+	if target, err := os.Readlink(filepath.Join(root, "GEMINI.md")); err != nil {
+		t.Fatalf("Readlink(GEMINI.md) error = %v", err)
+	} else if target != ".ctxpm/AGENTS.md" {
+		t.Fatalf("GEMINI.md symlink target = %q, want .ctxpm/AGENTS.md", target)
 	}
 }
 
@@ -605,8 +695,12 @@ func TestInitMigratesExistingSkillDirectoryIntoPackages(t *testing.T) {
 	if pkg.Path != ".ctxpm/packages/skills/reviewer" {
 		t.Fatalf("package path = %q", pkg.Path)
 	}
-	if !hasString(pkg.Compatibility, "skills/reviewer") || !hasString(pkg.Compatibility, ".agents/skills/reviewer") {
-		t.Fatalf("package compatibility = %v", pkg.Compatibility)
+	// Verify compatibility symlinks exist on disk (derived: .agents/skills/reviewer,
+	// and the original migration path: skills/reviewer).
+	for _, compatPath := range []string{".agents/skills/reviewer", "skills/reviewer"} {
+		if _, err := os.Lstat(filepath.Join(root, compatPath)); err != nil {
+			t.Fatalf("compatibility symlink %q missing: %v", compatPath, err)
+		}
 	}
 	target, err := os.Readlink(filepath.Join(root, "skills", "reviewer"))
 	if err != nil {
@@ -651,9 +745,6 @@ func TestInitRegistersExistingCanonicalPackageFromCtxpmDirectory(t *testing.T) {
 		found = true
 		if pkg.Path != ".ctxpm/packages/skills/ctxpm-release" {
 			t.Fatalf("package path = %q", pkg.Path)
-		}
-		if !hasString(pkg.Compatibility, ".agents/skills/ctxpm-release") {
-			t.Fatalf("package compatibility = %v", pkg.Compatibility)
 		}
 		break
 	}
@@ -700,9 +791,6 @@ func TestInitRegistersExistingCanonicalDependencyFromCtxpmDirectory(t *testing.T
 		found = true
 		if dep.Path != ".ctxpm/dependencies/rules/shared-rule.md" {
 			t.Fatalf("dependency path = %q", dep.Path)
-		}
-		if !hasString(dep.Compatibility, ".agents/rules/shared-rule.md") {
-			t.Fatalf("dependency compatibility = %v", dep.Compatibility)
 		}
 		break
 	}
@@ -753,8 +841,15 @@ func TestValidateReportsMissingPackageCompatibility(t *testing.T) {
 
 func TestValidateReportsMissingEntrypointAlias(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte(manifest.ManagedEntrypoint()), 0o644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
+	// Source lives in .ctxpm/; root AGENTS.md is a symlink. CLAUDE.md is absent.
+	if err := os.MkdirAll(filepath.Join(root, ".ctxpm"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".ctxpm", "AGENTS.md"), []byte(manifest.ManagedEntrypoint()), 0o644); err != nil {
+		t.Fatalf("WriteFile(.ctxpm/AGENTS.md) error = %v", err)
+	}
+	if err := os.Symlink(".ctxpm/AGENTS.md", filepath.Join(root, "AGENTS.md")); err != nil {
+		t.Fatalf("Symlink(AGENTS.md) error = %v", err)
 	}
 	writeManifestForTest(t, root, &manifest.Manifest{
 		Version:      manifest.CurrentManifestVersion,
@@ -809,15 +904,22 @@ func TestEntrypointSyncCreatesSharedAliases(t *testing.T) {
 	}
 	if target, err := os.Readlink(filepath.Join(root, "CLAUDE.md")); err != nil {
 		t.Fatalf("Readlink() error = %v", err)
-	} else if target != "AGENTS.md" {
+	} else if target != ".ctxpm/AGENTS.md" {
 		t.Fatalf("CLAUDE.md symlink target = %q", target)
 	}
 }
 
 func TestEntrypointDoctorGuidesMergeForRealAliasFile(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte(manifest.ManagedEntrypoint()), 0o644); err != nil {
-		t.Fatalf("WriteFile(AGENTS.md) error = %v", err)
+	// Source in .ctxpm/, root AGENTS.md is a symlink. CLAUDE.md exists as a real file (needs migration).
+	if err := os.MkdirAll(filepath.Join(root, ".ctxpm"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".ctxpm", "AGENTS.md"), []byte(manifest.ManagedEntrypoint()), 0o644); err != nil {
+		t.Fatalf("WriteFile(.ctxpm/AGENTS.md) error = %v", err)
+	}
+	if err := os.Symlink(".ctxpm/AGENTS.md", filepath.Join(root, "AGENTS.md")); err != nil {
+		t.Fatalf("Symlink(AGENTS.md) error = %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "CLAUDE.md"), []byte("custom\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile(CLAUDE.md) error = %v", err)
@@ -923,8 +1025,9 @@ func TestMigrateMovesCompatibilityResourceAndValidates(t *testing.T) {
 		if pkg.Path != ".ctxpm/packages/skills/reviewer" {
 			t.Fatalf("package path = %q", pkg.Path)
 		}
-		if !hasString(pkg.Compatibility, ".agents/skills/reviewer") {
-			t.Fatalf("package compatibility = %v", pkg.Compatibility)
+		// Verify the derived compatibility symlink exists on disk.
+		if _, err := os.Lstat(filepath.Join(root, ".agents", "skills", "reviewer")); err != nil {
+			t.Fatalf("derived compatibility symlink missing: %v", err)
 		}
 		break
 	}
@@ -1239,18 +1342,22 @@ func TestUpdateRefreshesAllManagedEntrypoints(t *testing.T) {
 	server := newSingleFileUpdateServer(t, "/reviewer.md", "# reviewer\n")
 	defer server.Close()
 
-	for _, item := range []struct {
-		file string
-		body string
-	}{
-		{file: "AGENTS.md", body: "shared instructions"},
-		{file: "CLAUDE.md", body: "shared instructions"},
-	} {
-		path := filepath.Join(root, item.file)
-		original := "Intro\n\n<!-- ctxpm:begin -->\n" + item.body + "\n<!-- ctxpm:end -->\n\nFooter\n"
-		if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
-			t.Fatalf("WriteFile(%s) error = %v", item.file, err)
-		}
+	// New-world setup: source file lives in .ctxpm/, root AGENTS.md is a symlink.
+	sourceDir := filepath.Join(root, ".ctxpm")
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	sourcePath := filepath.Join(sourceDir, "AGENTS.md")
+	sourceBody := "Intro\n\n<!-- ctxpm:begin -->\nshared instructions\n<!-- ctxpm:end -->\n\nFooter\n"
+	if err := os.WriteFile(sourcePath, []byte(sourceBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(.ctxpm/AGENTS.md) error = %v", err)
+	}
+	// AGENTS.md and CLAUDE.md at root are symlinks pointing to the source.
+	if err := os.Symlink(".ctxpm/AGENTS.md", filepath.Join(root, "AGENTS.md")); err != nil {
+		t.Fatalf("Symlink(AGENTS.md) error = %v", err)
+	}
+	if err := os.Symlink(".ctxpm/AGENTS.md", filepath.Join(root, "CLAUDE.md")); err != nil {
+		t.Fatalf("Symlink(CLAUDE.md) error = %v", err)
 	}
 	writeManifestForTest(t, root, &manifest.Manifest{
 		Version: manifest.CurrentManifestVersion,
@@ -1284,14 +1391,15 @@ func TestUpdateRefreshesAllManagedEntrypoints(t *testing.T) {
 		t.Fatalf("Update() error = %v", err)
 	}
 
-	got := readFileForTest(t, filepath.Join(root, "AGENTS.md"))
+	got := readFileForTest(t, filepath.Join(root, ".ctxpm", "AGENTS.md"))
 	want := "Intro\n\n" + manifest.ManagedEntrypoint() + "\n\nFooter\n"
 	if got != want {
-		t.Fatalf("AGENTS.md mismatch\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		t.Fatalf(".ctxpm/AGENTS.md mismatch\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
+	// Root AGENTS.md and CLAUDE.md remain valid symlinks pointing to the source.
 	if target, err := os.Readlink(filepath.Join(root, "CLAUDE.md")); err != nil {
 		t.Fatalf("Readlink() error = %v", err)
-	} else if target != "AGENTS.md" {
+	} else if target != ".ctxpm/AGENTS.md" {
 		t.Fatalf("CLAUDE.md symlink target = %q", target)
 	}
 }
@@ -1385,9 +1493,10 @@ func TestUpdateReportsDamagedManagedBlock(t *testing.T) {
 	server := newSingleFileUpdateServer(t, "/reviewer.md", "# reviewer\n")
 	defer server.Close()
 
-	entrypoint := filepath.Join(root, "AGENTS.md")
+	// Write damaged block at root; seedCanonicalEntrypoint will move it to .ctxpm/AGENTS.md.
+	setupPath := filepath.Join(root, "AGENTS.md")
 	original := "Intro\n\n<!-- ctxpm:begin agent=generic -->\nold instructions\n"
-	if err := os.WriteFile(entrypoint, []byte(original), 0o644); err != nil {
+	if err := os.WriteFile(setupPath, []byte(original), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	writeManifestForTest(t, root, &manifest.Manifest{
@@ -1424,7 +1533,9 @@ func TestUpdateReportsDamagedManagedBlock(t *testing.T) {
 	if !strings.Contains(err.Error(), "managed ctxpm block is damaged") {
 		t.Fatalf("Update() error = %v", err)
 	}
-	if got := readFileForTest(t, entrypoint); got != original {
+	// File was moved to .ctxpm/AGENTS.md by seedCanonicalEntrypoint; content must be unchanged.
+	movedPath := filepath.Join(root, ".ctxpm", "AGENTS.md")
+	if got := readFileForTest(t, movedPath); got != original {
 		t.Fatalf("damaged entrypoint should remain unchanged\n--- got ---\n%s\n--- want ---\n%s", got, original)
 	}
 }
@@ -1478,4 +1589,119 @@ func readRepoFileForTest(t *testing.T, relative string) string {
 		t.Fatalf("ReadFile(%s) error = %v", relative, err)
 	}
 	return string(data)
+}
+
+func initGitRepoForTest(t *testing.T, root string) {
+	t.Helper()
+	for _, args := range [][]string{
+		{"init", root},
+		{"-C", root, "config", "user.email", "test@example.com"},
+		{"-C", root, "config", "user.name", "Test"},
+	} {
+		out, err := runGit(context.Background(), args...)
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+}
+
+func TestStageEntrypointMigration_NotGitRepo(t *testing.T) {
+	root := t.TempDir()
+	staged := stageEntrypointMigration(root)
+	if len(staged) != 0 {
+		t.Errorf("expected no staged ops in non-git dir, got %v", staged)
+	}
+}
+
+func TestStageEntrypointMigration_StagesAfterMigration(t *testing.T) {
+	root := t.TempDir()
+	initGitRepoForTest(t, root)
+
+	// Create AGENTS.md as a real file and commit it (simulates a pre-migration project).
+	agentsPath := filepath.Join(root, manifest.CanonicalEntrypointFile())
+	if err := os.WriteFile(agentsPath, []byte("# agents\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile AGENTS.md: %v", err)
+	}
+	if _, err := runGit(context.Background(), "-C", root, "add", manifest.CanonicalEntrypointFile()); err != nil {
+		t.Fatalf("git add AGENTS.md: %v", err)
+	}
+	if _, err := runGit(context.Background(), "-C", root, "commit", "-m", "initial"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+
+	// Simulate migration: rename to .ctxpm/AGENTS.md and create a symlink.
+	sourceRel := manifest.CanonicalEntrypointSourceFile()
+	sourceAbs := filepath.Join(root, sourceRel)
+	if err := os.MkdirAll(filepath.Dir(sourceAbs), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.Rename(agentsPath, sourceAbs); err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+	relTarget, _ := filepath.Rel(root, sourceAbs)
+	if err := os.Symlink(relTarget, agentsPath); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	staged := stageEntrypointMigration(root)
+
+	wantOps := []string{
+		"git rm --cached " + manifest.CanonicalEntrypointFile(),
+		"git add " + manifest.CanonicalEntrypointSourceFile(),
+	}
+	for _, want := range wantOps {
+		found := false
+		for _, op := range staged {
+			if op == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected staged op %q, got %v", want, staged)
+		}
+	}
+
+	// Running again should be idempotent (nothing left to stage).
+	staged2 := stageEntrypointMigration(root)
+	for _, op := range staged2 {
+		if op == "git rm --cached "+manifest.CanonicalEntrypointFile() ||
+			op == "git add "+manifest.CanonicalEntrypointSourceFile() {
+			t.Errorf("second call should be idempotent, but staged: %q", op)
+		}
+	}
+}
+
+func TestStageEntrypointMigration_AlreadyMigrated(t *testing.T) {
+	root := t.TempDir()
+	initGitRepoForTest(t, root)
+
+	// Set up already-migrated state: .ctxpm/AGENTS.md committed, AGENTS.md as symlink in index.
+	sourceRel := manifest.CanonicalEntrypointSourceFile()
+	sourceAbs := filepath.Join(root, sourceRel)
+	if err := os.MkdirAll(filepath.Dir(sourceAbs), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(sourceAbs, []byte("# agents\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile source: %v", err)
+	}
+	agentsPath := filepath.Join(root, manifest.CanonicalEntrypointFile())
+	relTarget, _ := filepath.Rel(root, sourceAbs)
+	if err := os.Symlink(relTarget, agentsPath); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+	if _, err := runGit(context.Background(), "-C", root, "add", sourceRel, manifest.CanonicalEntrypointFile()); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if _, err := runGit(context.Background(), "-C", root, "commit", "-m", "migrated"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+
+	staged := stageEntrypointMigration(root)
+	for _, op := range staged {
+		if op == "git rm --cached "+manifest.CanonicalEntrypointFile() ||
+			op == "git add "+manifest.CanonicalEntrypointSourceFile() {
+			t.Errorf("already-migrated repo should not stage entrypoint ops, got: %q", op)
+		}
+	}
 }
