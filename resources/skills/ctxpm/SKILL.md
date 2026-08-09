@@ -134,7 +134,7 @@ packages:
     entry: MEMORY.md
 ```
 
-Use `.ctxpm/AGENTS.md` as the canonical managed entrypoint source file. All root-level agent entrypoint filenames (`AGENTS.md`, `CLAUDE.md`, `ANTIGRAVITY.md`, etc.) are symlinks pointing directly to `.ctxpm/AGENTS.md`. Keep all of these root-level symlinks out of Git with `.gitignore`.
+Use `.ctxpm/AGENTS.md` as the canonical managed entrypoint source file. All root-level agent entrypoint filenames (`AGENTS.md`, `CLAUDE.md`, `ANTIGRAVITY.md`, `GEMINI.md`, etc.) are symlinks pointing directly to `.ctxpm/AGENTS.md`. Keep all of these root-level symlinks out of Git with `.gitignore`.
 
 ## Lifecycle Rules
 

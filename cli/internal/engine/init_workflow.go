@@ -68,6 +68,7 @@ func detectInitAgent(root string, requested string, m *manifest.Manifest) initDi
 	}{
 		{agent: "claude-code", file: "CLAUDE.md"},
 		{agent: "antigravity", file: "ANTIGRAVITY.md"},
+		{agent: "gemini-cli", file: "GEMINI.md"},
 		{agent: "generic", file: manifest.CanonicalEntrypointSourceFile()},
 		{agent: "generic", file: "AGENTS.md"},
 	} {
@@ -276,7 +277,7 @@ func discoverInitResources(root string, projectHints []string) ([]discoveredReso
 
 func discoverCompatibilityResources(root string, projectHints []string) ([]discoveredResource, error) {
 	candidates := []discoveredResource{}
-	for _, relDir := range []string{".agents", ".claude", ".antigravity"} {
+	for _, relDir := range []string{".agents", ".claude", ".antigravity", ".gemini", ".cursor", ".windsurf", ".kiro"} {
 		for _, resourceType := range manifest.SupportedTypes() {
 			discovered, err := discoverTypedResourceDir(root, filepath.ToSlash(filepath.Join(relDir, manifest.TypeDir(resourceType))), resourceType, true, projectHints, true, true)
 			if err != nil {
@@ -578,7 +579,9 @@ func compatibilityIgnoreRules(agents []string, resource manifest.Resource) []str
 	rules := []string{}
 	for _, compat := range resource.EffectiveCompatibility(agents) {
 		switch {
-		case strings.HasPrefix(compat, ".agents/"), strings.HasPrefix(compat, ".claude/"), strings.HasPrefix(compat, ".antigravity/"):
+		case strings.HasPrefix(compat, ".agents/"), strings.HasPrefix(compat, ".claude/"), strings.HasPrefix(compat, ".antigravity/"),
+			strings.HasPrefix(compat, ".gemini/"), strings.HasPrefix(compat, ".cursor/"),
+			strings.HasPrefix(compat, ".windsurf/"), strings.HasPrefix(compat, ".kiro/"):
 			rules = append(rules, filepath.ToSlash(filepath.Dir(compat))+"/")
 		default:
 			rules = append(rules, compat)
@@ -613,14 +616,22 @@ func ignoredInitPath(rel string) bool {
 	return strings.HasPrefix(rel, ".ctxpm/") ||
 		strings.HasPrefix(rel, ".agents/") ||
 		strings.HasPrefix(rel, ".claude/") ||
-		strings.HasPrefix(rel, ".antigravity/")
+		strings.HasPrefix(rel, ".antigravity/") ||
+		strings.HasPrefix(rel, ".gemini/") ||
+		strings.HasPrefix(rel, ".cursor/") ||
+		strings.HasPrefix(rel, ".windsurf/") ||
+		strings.HasPrefix(rel, ".kiro/")
 }
 
 func compatibilityDiscoveryPath(rel string) bool {
 	rel = filepath.ToSlash(rel)
 	return strings.HasPrefix(rel, ".agents/") ||
 		strings.HasPrefix(rel, ".claude/") ||
-		strings.HasPrefix(rel, ".antigravity/")
+		strings.HasPrefix(rel, ".antigravity/") ||
+		strings.HasPrefix(rel, ".gemini/") ||
+		strings.HasPrefix(rel, ".cursor/") ||
+		strings.HasPrefix(rel, ".windsurf/") ||
+		strings.HasPrefix(rel, ".kiro/")
 }
 
 func resourcePathExists(root, resourcePath string) bool {

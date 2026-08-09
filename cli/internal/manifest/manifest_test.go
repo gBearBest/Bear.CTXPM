@@ -472,6 +472,154 @@ func TestRemovePackageCollapsesEmptySection(t *testing.T) {
 	}
 }
 
+func TestAgentCompatibilityPrefix(t *testing.T) {
+	tests := []struct {
+		agent string
+		want  string
+	}{
+		{agent: "generic", want: ".agents"},
+		{agent: "codex", want: ".agents"},
+		{agent: "claude-code", want: ".claude"},
+		{agent: "antigravity", want: ".antigravity"},
+		{agent: "gemini-cli", want: ".gemini"},
+		{agent: "cursor", want: ".cursor"},
+		{agent: "windsurf", want: ".windsurf"},
+		{agent: "kiro", want: ".kiro"},
+		{agent: "unknown", want: ""},
+		{agent: "", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.agent, func(t *testing.T) {
+			got := agentCompatibilityPrefix(tt.agent)
+			if got != tt.want {
+				t.Errorf("agentCompatibilityPrefix(%q) = %q, want %q", tt.agent, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEntrypointFile(t *testing.T) {
+	tests := []struct {
+		agent string
+		want  string
+	}{
+		{agent: "claude-code", want: "CLAUDE.md"},
+		{agent: "antigravity", want: "ANTIGRAVITY.md"},
+		{agent: "gemini-cli", want: "GEMINI.md"},
+		{agent: "generic", want: "AGENTS.md"},
+		{agent: "codex", want: "AGENTS.md"},
+		{agent: "cursor", want: "AGENTS.md"},
+		{agent: "windsurf", want: "AGENTS.md"},
+		{agent: "kiro", want: "AGENTS.md"},
+		{agent: "unknown", want: "AGENTS.md"},
+		{agent: "", want: "AGENTS.md"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.agent, func(t *testing.T) {
+			got := EntrypointFile(tt.agent)
+			if got != tt.want {
+				t.Errorf("EntrypointFile(%q) = %q, want %q", tt.agent, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDerivedCompatibilityPathsNewAgents(t *testing.T) {
+	tests := []struct {
+		name     string
+		agents   []string
+		resource Resource
+		want     []string
+	}{
+		{
+			name:   "gemini-cli skill",
+			agents: []string{"gemini-cli"},
+			resource: Resource{
+				Type: "skill",
+				Path: ".ctxpm/packages/skills/my-skill",
+			},
+			want: []string{".gemini/skills/my-skill"},
+		},
+		{
+			name:   "cursor rule",
+			agents: []string{"cursor"},
+			resource: Resource{
+				Type: "rule",
+				Path: ".ctxpm/packages/rules/my-rule.md",
+			},
+			want: []string{".cursor/rules/my-rule.md"},
+		},
+		{
+			name:   "windsurf spec",
+			agents: []string{"windsurf"},
+			resource: Resource{
+				Type: "spec",
+				Path: ".ctxpm/packages/specs/my-spec",
+			},
+			want: []string{".windsurf/specs/my-spec"},
+		},
+		{
+			name:   "kiro prompt",
+			agents: []string{"kiro"},
+			resource: Resource{
+				Type: "prompt",
+				Path: ".ctxpm/packages/prompts/my-prompt.md",
+			},
+			want: []string{".kiro/prompts/my-prompt.md"},
+		},
+		{
+			name:   "multi-agent with new agents",
+			agents: []string{"generic", "claude-code", "gemini-cli", "cursor"},
+			resource: Resource{
+				Type: "skill",
+				Path: ".ctxpm/packages/skills/shared-skill",
+			},
+			want: []string{
+				".agents/skills/shared-skill",
+				".claude/skills/shared-skill",
+				".gemini/skills/shared-skill",
+				".cursor/skills/shared-skill",
+			},
+		},
+		{
+			name:   "all new agents memory",
+			agents: []string{"gemini-cli", "cursor", "windsurf", "kiro"},
+			resource: Resource{
+				Type: "memory",
+				Path: ".ctxpm/packages/memories/project-memory",
+			},
+			want: []string{
+				".gemini/memories/project-memory",
+				".cursor/memories/project-memory",
+				".windsurf/memories/project-memory",
+				".kiro/memories/project-memory",
+			},
+		},
+		{
+			name:   "unknown agent yields no paths",
+			agents: []string{"unknown-agent"},
+			resource: Resource{
+				Type: "skill",
+				Path: ".ctxpm/packages/skills/my-skill",
+			},
+			want: []string{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := DerivedCompatibilityPaths(tt.agents, tt.resource)
+			if len(got) != len(tt.want) {
+				t.Fatalf("DerivedCompatibilityPaths() len=%d, want %d\ngot:  %v\nwant: %v", len(got), len(tt.want), got, tt.want)
+			}
+			for i, p := range got {
+				if p != tt.want[i] {
+					t.Errorf("path[%d] = %q, want %q", i, p, tt.want[i])
+				}
+			}
+		})
+	}
+}
+
 func writeManifest(t *testing.T, root, content string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(root, "ctxpm.yaml"), []byte(content), 0o644); err != nil {

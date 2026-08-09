@@ -285,6 +285,10 @@ Agent profile to directory prefix:
 | `codex` | `.agents/` |
 | `claude-code` | `.claude/` |
 | `antigravity` | `.antigravity/` |
+| `gemini-cli` | `.gemini/` |
+| `cursor` | `.cursor/` |
+| `windsurf` | `.windsurf/` |
+| `kiro` | `.kiro/` |
 
 Resource type to subdirectory:
 

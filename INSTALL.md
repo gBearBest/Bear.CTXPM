@@ -38,6 +38,10 @@ Prioritize the following profiles:
 - `codex`
 - `claude-code`
 - `antigravity`
+- `gemini-cli`
+- `cursor`
+- `windsurf`
+- `kiro`
 - `generic`
 
 If the user does not clearly specify one:
@@ -47,6 +51,7 @@ If the user does not clearly specify one:
    - `AGENTS.md`
    - `CLAUDE.md`
    - `ANTIGRAVITY.md`
+   - `GEMINI.md`
 2. If `.ctxpm/AGENTS.md` or `AGENTS.md` exists, prefer `generic` (or `codex` if Codex is detected).
 3. If one of the agent-specific files exists, prefer the corresponding profile.
 4. If none of the known entrypoint files exists, ask the user which agent they primarily use.
@@ -59,9 +64,13 @@ The mapping between agents and default root entrypoint filenames is:
 | `codex` | `AGENTS.md` |
 | `claude-code` | `CLAUDE.md` |
 | `antigravity` | `ANTIGRAVITY.md` |
+| `gemini-cli` | `GEMINI.md` |
+| `cursor` | `AGENTS.md` |
+| `windsurf` | `AGENTS.md` |
+| `kiro` | `AGENTS.md` |
 | `generic` | `AGENTS.md` |
 
-In the shared-entrypoint model, `.ctxpm/AGENTS.md` is the canonical managed source file. All root-level entrypoint filenames (`AGENTS.md`, `CLAUDE.md`, `ANTIGRAVITY.md`) are symlinks that point directly to `.ctxpm/AGENTS.md` and should be kept out of version control via `.gitignore`.
+In the shared-entrypoint model, `.ctxpm/AGENTS.md` is the canonical managed source file. All root-level entrypoint filenames (`AGENTS.md`, `CLAUDE.md`, `ANTIGRAVITY.md`, `GEMINI.md`) are symlinks that point directly to `.ctxpm/AGENTS.md` and should be kept out of version control via `.gitignore`.
 
 ---
 
@@ -180,6 +189,7 @@ project/
   AGENTS.md
   CLAUDE.md -> AGENTS.md
   ANTIGRAVITY.md -> AGENTS.md
+  GEMINI.md -> AGENTS.md
 ```
 
 Do not create the following as required artifacts for v0.1:
@@ -575,6 +585,7 @@ Also ignore generated root entrypoint alias filenames that point back to `AGENTS
 ```gitignore
 CLAUDE.md
 ANTIGRAVITY.md
+GEMINI.md
 ```
 
 Do not ignore `AGENTS.md`, because it is the canonical managed root entrypoint file.
@@ -700,7 +711,7 @@ After completion, the project should at least satisfy:
 11. When the project-local CLI was available, the project-local `ctxpm init` workflow has been executed instead of relying on purely manual AI bootstrapping for deterministic steps.
 12. Compatibility symlinks for managed resources exist in each confirmed agent's recognizable discovery directories for the corresponding resource types.
 13. Compatibility symlinks for `ctxpm` exist in every confirmed agent's default skill discovery directories, and are derived automatically from the declared `agents` without needing an explicit `compatibility` field in `ctxpm.yaml`.
-14. Agent-specific root entrypoint aliases such as `CLAUDE.md` or `ANTIGRAVITY.md` point back to `AGENTS.md` when those agent profiles are declared.
+14. Agent-specific root entrypoint aliases such as `CLAUDE.md`, `ANTIGRAVITY.md`, or `GEMINI.md` point back to `AGENTS.md` when those agent profiles are declared.
 15. The managed entrypoint block uses the canonical `ctxpm` template and instructs future AI agents to use `ctxpm` or the same `ctxpm` workflow before creating, reading, updating, or deleting AI resources.
 16. Future AI resources continue to be managed using the same `ctxpm` rules instead of agent default install locations.
 17. External dependencies installed from GitHub or direct URLs record hash-based `version` values in `ctxpm.yaml` for future update detection.
