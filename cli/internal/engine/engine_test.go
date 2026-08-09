@@ -1585,3 +1585,118 @@ func readRepoFileForTest(t *testing.T, relative string) string {
 	}
 	return string(data)
 }
+
+func initGitRepoForTest(t *testing.T, root string) {
+	t.Helper()
+	for _, args := range [][]string{
+		{"init", root},
+		{"-C", root, "config", "user.email", "test@example.com"},
+		{"-C", root, "config", "user.name", "Test"},
+	} {
+		out, err := runGit(context.Background(), args...)
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+}
+
+func TestStageEntrypointMigration_NotGitRepo(t *testing.T) {
+	root := t.TempDir()
+	staged := stageEntrypointMigration(root)
+	if len(staged) != 0 {
+		t.Errorf("expected no staged ops in non-git dir, got %v", staged)
+	}
+}
+
+func TestStageEntrypointMigration_StagesAfterMigration(t *testing.T) {
+	root := t.TempDir()
+	initGitRepoForTest(t, root)
+
+	// Create AGENTS.md as a real file and commit it (simulates a pre-migration project).
+	agentsPath := filepath.Join(root, manifest.CanonicalEntrypointFile())
+	if err := os.WriteFile(agentsPath, []byte("# agents\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile AGENTS.md: %v", err)
+	}
+	if _, err := runGit(context.Background(), "-C", root, "add", manifest.CanonicalEntrypointFile()); err != nil {
+		t.Fatalf("git add AGENTS.md: %v", err)
+	}
+	if _, err := runGit(context.Background(), "-C", root, "commit", "-m", "initial"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+
+	// Simulate migration: rename to .ctxpm/AGENTS.md and create a symlink.
+	sourceRel := manifest.CanonicalEntrypointSourceFile()
+	sourceAbs := filepath.Join(root, sourceRel)
+	if err := os.MkdirAll(filepath.Dir(sourceAbs), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.Rename(agentsPath, sourceAbs); err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+	relTarget, _ := filepath.Rel(root, sourceAbs)
+	if err := os.Symlink(relTarget, agentsPath); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	staged := stageEntrypointMigration(root)
+
+	wantOps := []string{
+		"git rm --cached " + manifest.CanonicalEntrypointFile(),
+		"git add " + manifest.CanonicalEntrypointSourceFile(),
+	}
+	for _, want := range wantOps {
+		found := false
+		for _, op := range staged {
+			if op == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected staged op %q, got %v", want, staged)
+		}
+	}
+
+	// Running again should be idempotent (nothing left to stage).
+	staged2 := stageEntrypointMigration(root)
+	for _, op := range staged2 {
+		if op == "git rm --cached "+manifest.CanonicalEntrypointFile() ||
+			op == "git add "+manifest.CanonicalEntrypointSourceFile() {
+			t.Errorf("second call should be idempotent, but staged: %q", op)
+		}
+	}
+}
+
+func TestStageEntrypointMigration_AlreadyMigrated(t *testing.T) {
+	root := t.TempDir()
+	initGitRepoForTest(t, root)
+
+	// Set up already-migrated state: .ctxpm/AGENTS.md committed, AGENTS.md as symlink in index.
+	sourceRel := manifest.CanonicalEntrypointSourceFile()
+	sourceAbs := filepath.Join(root, sourceRel)
+	if err := os.MkdirAll(filepath.Dir(sourceAbs), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(sourceAbs, []byte("# agents\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile source: %v", err)
+	}
+	agentsPath := filepath.Join(root, manifest.CanonicalEntrypointFile())
+	relTarget, _ := filepath.Rel(root, sourceAbs)
+	if err := os.Symlink(relTarget, agentsPath); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+	if _, err := runGit(context.Background(), "-C", root, "add", sourceRel, manifest.CanonicalEntrypointFile()); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if _, err := runGit(context.Background(), "-C", root, "commit", "-m", "migrated"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+
+	staged := stageEntrypointMigration(root)
+	for _, op := range staged {
+		if op == "git rm --cached "+manifest.CanonicalEntrypointFile() ||
+			op == "git add "+manifest.CanonicalEntrypointSourceFile() {
+			t.Errorf("already-migrated repo should not stage entrypoint ops, got: %q", op)
+		}
+	}
+}
