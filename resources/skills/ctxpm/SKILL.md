@@ -142,7 +142,7 @@ Use `.ctxpm/AGENTS.md` as the canonical managed entrypoint source file. All root
 
 1. Classify the resource as `dependency` or `package`.
 2. Install the canonical resource root under `.ctxpm/dependencies/` or `.ctxpm/packages/`.
-3. Record `layout`, `path`, and `entry`. Omit `compatibility` unless the derived paths are wrong.
+3. Record `layout`, `path`, and `entry`. Do not add a `compatibility` field — paths are derived automatically from `agents`.
 4. For dependencies, record `source` and `version`.
 5. Repair compatibility exposure paths.
 6. Ensure `.gitignore` includes safe ignore rules for repaired compatibility paths.

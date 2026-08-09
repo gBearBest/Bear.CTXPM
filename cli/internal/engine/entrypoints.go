@@ -87,41 +87,14 @@ func (a *App) EntrypointDoctor() (*EntrypointDoctorResult, error) {
 	return &EntrypointDoctorResult{OK: len(issues) == 0, Issues: issues}, nil
 }
 
-// normalizeSharedEntrypoints ensures any explicitly declared entrypoints use
-// the canonical file and managed mode. It does NOT back-fill entries for agents
-// that are absent from m.Entrypoints — omitting entrypoints is the canonical
-// form and means "all declared agents use AGENTS.md + managed".
-//
-// Returns true if a change was made to m.Entrypoints.
+// normalizeSharedEntrypoints clears any deprecated Entrypoints field that may
+// have been parsed from an old yaml file. Returns true if the field was non-nil.
 func normalizeSharedEntrypoints(m *manifest.Manifest) bool {
-	if m == nil {
+	if m == nil || m.Entrypoints == nil {
 		return false
 	}
-	if m.Entrypoints == nil {
-		return false
-	}
-	delete(m.Entrypoints, "")
-
-	changed := false
-	want := manifest.Entrypoint{File: manifest.CanonicalEntrypointFile(), Mode: "managed"}
-	for agent, current := range m.Entrypoints {
-		if strings.TrimSpace(agent) == "" {
-			continue
-		}
-		if current.File != want.File || current.EffectiveMode() != want.Mode {
-			m.Entrypoints[agent] = want
-			changed = true
-		}
-	}
-	// If normalizing left the map empty, nil it so omitempty drops it from yaml.
-	if len(m.Entrypoints) == 0 {
-		m.Entrypoints = nil
-		if changed {
-			// It was non-nil before, so clearing it is a change.
-			return true
-		}
-	}
-	return changed
+	m.Entrypoints = nil
+	return true
 }
 
 func syncManagedEntrypoints(root string, m *manifest.Manifest, allowRepair bool) ([]string, error) {
@@ -131,16 +104,6 @@ func syncManagedEntrypoints(root string, m *manifest.Manifest, allowRepair bool)
 	files := []string{}
 	if err := seedCanonicalEntrypoint(root, m); err != nil {
 		return nil, err
-	}
-	distinct := map[string]bool{}
-	for _, entrypoint := range m.Entrypoints {
-		if entrypoint.EffectiveMode() != "managed" {
-			continue
-		}
-		distinct[strings.TrimSpace(entrypoint.File)] = true
-	}
-	if len(distinct) == 0 {
-		distinct[manifest.CanonicalEntrypointFile()] = true
 	}
 
 	// Write managed content to the source file inside .ctxpm/.
@@ -180,28 +143,6 @@ func validateManagedEntrypoints(root string, m *manifest.Manifest) []string {
 		return nil
 	}
 	issues := []string{}
-	// Validate any explicitly declared entrypoints.
-	if len(m.Entrypoints) > 0 {
-		distinct := map[string]bool{}
-		for agent, entrypoint := range m.Entrypoints {
-			if entrypoint.EffectiveMode() != "managed" {
-				issues = append(issues, fmt.Sprintf("entrypoint %q uses unsupported mode %q", agent, entrypoint.Mode))
-				continue
-			}
-			distinct[entrypoint.File] = true
-			if entrypoint.File != manifest.CanonicalEntrypointFile() {
-				issues = append(issues, fmt.Sprintf("entrypoint %q should use shared canonical file %q, found %q", agent, manifest.CanonicalEntrypointFile(), entrypoint.File))
-			}
-		}
-		if len(distinct) > 1 {
-			files := make([]string, 0, len(distinct))
-			for file := range distinct {
-				files = append(files, file)
-			}
-			sort.Strings(files)
-			issues = append(issues, "multiple managed entrypoint files are configured: "+strings.Join(files, ", "))
-		}
-	}
 
 	agents := entrypointAgents(m)
 	sourceAbs := filepath.Join(root, manifest.CanonicalEntrypointSourceFile())
@@ -209,9 +150,8 @@ func validateManagedEntrypoints(root string, m *manifest.Manifest) []string {
 	if len(agents) > 0 {
 		switch state, err := readManagedEntrypointState(sourceAbs); {
 		case errors.Is(err, os.ErrNotExist):
-			if len(m.Entrypoints) > 0 {
-				issues = append(issues, fmt.Sprintf("managed entrypoint %q is missing", manifest.CanonicalEntrypointFile()))
-			}
+			// Source file was never created — skip further entrypoint checks.
+			// Run `ctxpm entrypoint sync` to create it.
 		case err != nil:
 			issues = append(issues, err.Error())
 		case !state.HasManagedBlock:
@@ -267,11 +207,6 @@ func validateManagedEntrypoints(root string, m *manifest.Manifest) []string {
 func entrypointAgents(m *manifest.Manifest) []string {
 	seen := map[string]bool{}
 	for _, agent := range m.Agents {
-		if trimmed := strings.TrimSpace(agent); trimmed != "" {
-			seen[trimmed] = true
-		}
-	}
-	for agent := range m.Entrypoints {
 		if trimmed := strings.TrimSpace(agent); trimmed != "" {
 			seen[trimmed] = true
 		}

@@ -48,7 +48,12 @@ type Manifest struct {
 	UpdatePolicy UpdatePolicy          `yaml:"update_policy,omitempty"`
 	Dependencies []Resource            `yaml:"dependencies"`
 	Packages     []Resource            `yaml:"packages"`
-	Entrypoints  map[string]Entrypoint `yaml:"entrypoints,omitempty"`
+
+	// Deprecated: parsed from old yaml for migration detection only; never written back.
+	Entrypoints map[string]Entrypoint `yaml:"entrypoints,omitempty"`
+
+	// legacyFields records deprecated yaml field names detected during Load.
+	legacyFields []string
 }
 
 type Project struct {
@@ -67,13 +72,15 @@ type Entrypoint struct {
 }
 
 type Resource struct {
-	Name          string   `yaml:"name"`
-	Type          string   `yaml:"type"`
-	Layout        string   `yaml:"layout,omitempty"`
-	Path          string   `yaml:"path"`
-	Entry         string   `yaml:"entry,omitempty"`
-	Source        *Source  `yaml:"source,omitempty"`
-	Version       string   `yaml:"version,omitempty"`
+	Name    string  `yaml:"name"`
+	Type    string  `yaml:"type"`
+	Layout  string  `yaml:"layout,omitempty"`
+	Path    string  `yaml:"path"`
+	Entry   string  `yaml:"entry,omitempty"`
+	Source  *Source `yaml:"source,omitempty"`
+	Version string  `yaml:"version,omitempty"`
+
+	// Deprecated: parsed from old yaml for migration detection only; never written back.
 	Compatibility []string `yaml:"compatibility,omitempty"`
 }
 
@@ -109,6 +116,7 @@ func Load(root string) (*Manifest, string, error) {
 	if err := yaml.Unmarshal(data, &m); err != nil {
 		return nil, manifestPath, err
 	}
+	m.detectLegacyFields()
 	if err := m.Validate(); err != nil {
 		return nil, manifestPath, err
 	}
@@ -129,7 +137,23 @@ func SyncVersion(root string) (bool, error) {
 }
 
 func marshalManifest(m *Manifest) ([]byte, error) {
-	data, err := marshalYAML(m)
+	// Strip deprecated fields before encoding — they must never appear in saved yaml.
+	stripped := *m
+	stripped.Entrypoints = nil
+	deps := make([]Resource, len(m.Dependencies))
+	for i, r := range m.Dependencies {
+		deps[i] = r
+		deps[i].Compatibility = nil
+	}
+	stripped.Dependencies = deps
+	pkgs := make([]Resource, len(m.Packages))
+	for i, r := range m.Packages {
+		pkgs[i] = r
+		pkgs[i].Compatibility = nil
+	}
+	stripped.Packages = pkgs
+
+	data, err := marshalYAML(&stripped)
 	if err != nil {
 		return nil, err
 	}
@@ -259,15 +283,27 @@ func (m *Manifest) Validate() error {
 			return err
 		}
 	}
-	for agent, entrypoint := range m.Entrypoints {
-		if strings.TrimSpace(agent) == "" {
-			return errors.New("entrypoints keys must not be empty")
-		}
-		if err := entrypoint.validate(agent); err != nil {
-			return err
+	return nil
+}
+
+// LegacyFields returns deprecated yaml field names that were present in the
+// loaded manifest. Non-empty result means the file needs migration: run any
+// ctxpm write command (install, add, update) to auto-clean.
+func (m *Manifest) LegacyFields() []string {
+	return m.legacyFields
+}
+
+func (m *Manifest) detectLegacyFields() {
+	seen := map[string]bool{}
+	for _, r := range append(m.Dependencies, m.Packages...) {
+		if r.Compatibility != nil && !seen["compatibility"] {
+			m.legacyFields = append(m.legacyFields, "compatibility")
+			seen["compatibility"] = true
 		}
 	}
-	return nil
+	if m.Entrypoints != nil && !seen["entrypoints"] {
+		m.legacyFields = append(m.legacyFields, "entrypoints")
+	}
 }
 
 func (r Resource) Validate(kind string) error {
@@ -509,17 +545,6 @@ func DerivedCompatibilityPaths(agents []string, r Resource) []string {
 	return paths
 }
 
-// EffectiveCompatibility returns the resolved compatibility paths for r.
-// When Compatibility is nil (field was omitted), paths are derived from agents.
-// When Compatibility is an explicit non-nil slice (even empty), that value is
-// returned as-is, allowing callers to suppress all exposure with [].
-func (r Resource) EffectiveCompatibility(agents []string) []string {
-	if r.Compatibility != nil {
-		return r.Compatibility
-	}
-	return DerivedCompatibilityPaths(agents, r)
-}
-
 func TypeDir(resourceType string) string {
 	switch resourceType {
 	case "skill":
@@ -569,26 +594,6 @@ func EntrypointFile(agent string) string {
 
 func ManagedEntrypoint() string {
 	return managedEntrypointTemplate
-}
-
-func (e Entrypoint) EffectiveMode() string {
-	mode := strings.TrimSpace(e.Mode)
-	if mode == "" {
-		return "managed"
-	}
-	return mode
-}
-
-func (e Entrypoint) validate(agent string) error {
-	if err := validateRelativePath(e.File, fmt.Sprintf("entrypoints %q file", agent)); err != nil {
-		return err
-	}
-	switch e.EffectiveMode() {
-	case "managed":
-		return nil
-	default:
-		return fmt.Errorf("entrypoints %q has unsupported mode %q", agent, e.Mode)
-	}
 }
 
 func (m *Manifest) HasResource(name string) bool {
@@ -984,10 +989,6 @@ func mappingKey(node *yaml.Node, key string) *yaml.Node {
 }
 
 func versionInsertionPoint(resource *yaml.Node) (int, string, error) {
-	if compatKey := mappingKey(resource, "compatibility"); compatKey != nil {
-		return compatKey.Line - 1, manifestEditInsertBefore, nil
-	}
-
 	for _, anchor := range []string{"source", "path"} {
 		if value := mappingValue(resource, anchor); value != nil {
 			return maxNodeLine(value) - 1, manifestEditInsertAfter, nil

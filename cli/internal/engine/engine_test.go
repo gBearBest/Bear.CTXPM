@@ -695,8 +695,12 @@ func TestInitMigratesExistingSkillDirectoryIntoPackages(t *testing.T) {
 	if pkg.Path != ".ctxpm/packages/skills/reviewer" {
 		t.Fatalf("package path = %q", pkg.Path)
 	}
-	if !hasString(pkg.Compatibility, "skills/reviewer") || !hasString(pkg.Compatibility, ".agents/skills/reviewer") {
-		t.Fatalf("package compatibility = %v", pkg.Compatibility)
+	// Verify compatibility symlinks exist on disk (derived: .agents/skills/reviewer,
+	// and the original migration path: skills/reviewer).
+	for _, compatPath := range []string{".agents/skills/reviewer", "skills/reviewer"} {
+		if _, err := os.Lstat(filepath.Join(root, compatPath)); err != nil {
+			t.Fatalf("compatibility symlink %q missing: %v", compatPath, err)
+		}
 	}
 	target, err := os.Readlink(filepath.Join(root, "skills", "reviewer"))
 	if err != nil {
@@ -1021,8 +1025,9 @@ func TestMigrateMovesCompatibilityResourceAndValidates(t *testing.T) {
 		if pkg.Path != ".ctxpm/packages/skills/reviewer" {
 			t.Fatalf("package path = %q", pkg.Path)
 		}
-		if !hasString(pkg.Compatibility, ".agents/skills/reviewer") {
-			t.Fatalf("package compatibility = %v", pkg.Compatibility)
+		// Verify the derived compatibility symlink exists on disk.
+		if _, err := os.Lstat(filepath.Join(root, ".agents", "skills", "reviewer")); err != nil {
+			t.Fatalf("derived compatibility symlink missing: %v", err)
 		}
 		break
 	}
