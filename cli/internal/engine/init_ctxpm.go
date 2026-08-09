@@ -182,7 +182,7 @@ func ensureBundledCtxpm(root string, agents []string) (*bundledCtxpmResult, erro
 	if err := ensureCompatibility(root, agents, resource); err != nil {
 		return nil, err
 	}
-	for _, compat := range resource.EffectiveCompatibility(agents) {
+	for _, compat := range manifest.DerivedCompatibilityPaths(agents, resource) {
 		created = append(created, filepath.Join(root, filepath.FromSlash(compat)))
 	}
 	result.Files = dedupe(created)

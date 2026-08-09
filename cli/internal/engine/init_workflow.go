@@ -112,11 +112,6 @@ func detectAgentFromManifest(m *manifest.Manifest) string {
 	if m == nil {
 		return ""
 	}
-	if len(m.Entrypoints) == 1 {
-		for agent := range m.Entrypoints {
-			return agent
-		}
-	}
 	if len(m.Agents) == 1 {
 		return m.Agents[0]
 	}
@@ -135,12 +130,6 @@ func scanAndMigrateResources(root string, m *manifest.Manifest, projectName stri
 		return nil, err
 	}
 	for _, candidate := range candidates {
-		if candidate.requiresMigration {
-			// Keep the original path as an additional explicit compatibility symlink
-			// so the old location continues to resolve during the migration transition.
-			derived := manifest.DerivedCompatibilityPaths(m.Agents, candidate.resource)
-			candidate.resource.Compatibility = dedupe(append(derived, candidate.original))
-		}
 		if m.HasResource(candidate.resource.Name) {
 			if candidate.requiresMigration {
 				plan.unresolved = append(plan.unresolved, fmt.Sprintf("%s (%s): resource name already exists in ctxpm.yaml", candidate.original, candidate.resource.Name))
@@ -168,9 +157,23 @@ func scanAndMigrateResources(root string, m *manifest.Manifest, projectName stri
 			plan.unresolved = append(plan.unresolved, fmt.Sprintf("%s: compatibility setup failed: %v", candidate.original, err))
 			continue
 		}
+		// For migrated resources, also create a one-time transitional symlink at the original
+		// path if it is not already covered by a derived compatibility path.
+		if candidate.requiresMigration && candidate.original != "" {
+			derived := manifest.DerivedCompatibilityPaths(m.Agents, candidate.resource)
+			if !containsString(derived, candidate.original) {
+				originalAbs := filepath.Join(root, filepath.FromSlash(candidate.original))
+				targetAbs := filepath.Join(root, filepath.FromSlash(candidate.resource.Path))
+				if err := os.MkdirAll(filepath.Dir(originalAbs), 0o755); err == nil {
+					if relTarget, err := filepath.Rel(filepath.Dir(originalAbs), targetAbs); err == nil {
+						_ = createSymlinkIfAbsent(originalAbs, relTarget)
+					}
+				}
+			}
+		}
 		plan.recordCandidate(candidate, candidate.requiresMigration)
 		plan.files = append(plan.files, filepath.Join(root, filepath.FromSlash(candidate.resource.Path)))
-		for _, compat := range candidate.resource.Compatibility {
+		for _, compat := range manifest.DerivedCompatibilityPaths(m.Agents, candidate.resource) {
 			plan.files = append(plan.files, filepath.Join(root, filepath.FromSlash(compat)))
 		}
 	}
@@ -208,8 +211,6 @@ func collectMigrationCandidates(root string, m *manifest.Manifest, projectName s
 			plan.unresolved = append(plan.unresolved, fmt.Sprintf("%s: canonical path %s already exists", candidate.original, candidate.resource.Path))
 			continue
 		}
-		derived := manifest.DerivedCompatibilityPaths(m.Agents, candidate.resource)
-		candidate.resource.Compatibility = dedupe(append(derived, candidate.original))
 		plan.candidates = append(plan.candidates, candidate)
 	}
 	sortDiscoveredResources(plan.candidates)
@@ -577,7 +578,7 @@ func listTopLevelEntries(root string) ([]string, error) {
 
 func compatibilityIgnoreRules(agents []string, resource manifest.Resource) []string {
 	rules := []string{}
-	for _, compat := range resource.EffectiveCompatibility(agents) {
+	for _, compat := range manifest.DerivedCompatibilityPaths(agents, resource) {
 		switch {
 		case strings.HasPrefix(compat, ".agents/"), strings.HasPrefix(compat, ".claude/"), strings.HasPrefix(compat, ".antigravity/"),
 			strings.HasPrefix(compat, ".gemini/"), strings.HasPrefix(compat, ".cursor/"),
@@ -588,6 +589,22 @@ func compatibilityIgnoreRules(agents []string, resource manifest.Resource) []str
 		}
 	}
 	return dedupe(rules)
+}
+
+func containsString(slice []string, s string) bool {
+	for _, v := range slice {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+func createSymlinkIfAbsent(linkPath, relTarget string) error {
+	if _, err := os.Lstat(linkPath); err == nil {
+		return nil
+	}
+	return os.Symlink(relTarget, linkPath)
 }
 
 func moveResourceToCanonical(root, fromRel, toRel string) error {

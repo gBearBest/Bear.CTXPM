@@ -284,7 +284,7 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 		OwnershipInferred:          dedupe(append(discovery.evidence, resourcePlan.ownershipInferred...)),
 		UnresolvedResources:        dedupe(resourcePlan.unresolved),
 		CtxpmDependencyStatus:      ctxpmStatus,
-		CtxpmCompatibilityComplete: len(ctxpmResource.Compatibility) > 0,
+		CtxpmCompatibilityComplete: len(manifest.DerivedCompatibilityPaths(m.Agents, ctxpmResource)) > 0,
 		ManagedEntrypointUpdated:   true,
 		CtxpmYAMLStatus:            ctxpmYAMLStatus,
 		LocalCLIStatus:             localCLIStatus,
@@ -480,7 +480,7 @@ func (a *App) Validate() (*ValidateResult, error) {
 			issues = append(issues, err.Error())
 		}
 		issues = append(issues, validateMemoryResource(abs, dep)...)
-		for _, compat := range dep.EffectiveCompatibility(m.Agents) {
+		for _, compat := range manifest.DerivedCompatibilityPaths(m.Agents, dep) {
 			compatAbs := filepath.Join(a.Root, filepath.FromSlash(compat))
 			if _, err := os.Lstat(compatAbs); err != nil {
 				issues = append(issues, fmt.Sprintf("compatibility path %q is missing", compat))
@@ -493,7 +493,7 @@ func (a *App) Validate() (*ValidateResult, error) {
 			issues = append(issues, err.Error())
 		}
 		issues = append(issues, validateMemoryResource(abs, pkg)...)
-		for _, compat := range pkg.EffectiveCompatibility(m.Agents) {
+		for _, compat := range manifest.DerivedCompatibilityPaths(m.Agents, pkg) {
 			compatAbs := filepath.Join(a.Root, filepath.FromSlash(compat))
 			if _, err := os.Lstat(compatAbs); err != nil {
 				issues = append(issues, fmt.Sprintf("compatibility path %q is missing", compat))
@@ -767,7 +767,7 @@ func (a *App) CheckUpdates(ctx context.Context, opts CheckUpdatesOptions) (*Chec
 				CurrentVersion: dep.Version,
 				Status:         "unresolved",
 				Reason:         err.Error(),
-				Compatibility:  dep.Compatibility,
+				Compatibility:  manifest.DerivedCompatibilityPaths(m.Agents, dep),
 			})
 			continue
 		}
@@ -783,7 +783,7 @@ func (a *App) CheckUpdates(ctx context.Context, opts CheckUpdatesOptions) (*Chec
 			CurrentVersion: dep.Version,
 			LatestVersion:  version,
 			Status:         status,
-			Compatibility:  dep.Compatibility,
+			Compatibility:  manifest.DerivedCompatibilityPaths(m.Agents, dep),
 		})
 	}
 	result := &CheckUpdatesResult{
@@ -1045,7 +1045,7 @@ func (a *App) Detect() (*DetectResult, error) {
 		Unresolved:   plan.unresolved,
 	}
 	for _, candidate := range plan.candidates {
-		result.Candidates = append(result.Candidates, migrationCandidateToResult(candidate))
+		result.Candidates = append(result.Candidates, migrationCandidateToResult(m.Agents, candidate))
 	}
 	if len(result.Candidates) > 0 {
 		result.Status = "migration_candidates_found"
@@ -1195,7 +1195,7 @@ func (a *App) Migrate(opts MigrateOptions) (*MigrateResult, error) {
 		}
 		migratedResources = append(migratedResources, candidate.resource)
 		files = append(files, filepath.Join(a.Root, filepath.FromSlash(candidate.resource.Path)))
-		for _, compat := range candidate.resource.EffectiveCompatibility(m.Agents) {
+		for _, compat := range manifest.DerivedCompatibilityPaths(m.Agents, candidate.resource) {
 			files = append(files, filepath.Join(a.Root, filepath.FromSlash(compat)))
 		}
 		action.Status = "migrated"
@@ -1232,14 +1232,27 @@ func (a *App) Migrate(opts MigrateOptions) (*MigrateResult, error) {
 	return result, nil
 }
 
-func migrationCandidateToResult(candidate discoveredResource) MigrationCandidate {
+func migrationCandidateToResult(agents []string, candidate discoveredResource) MigrationCandidate {
+	derived := manifest.DerivedCompatibilityPaths(agents, candidate.resource)
+	compatPaths := append([]string(nil), derived...)
+	// Include the original path if it's not already in the derived set (transitional symlink).
+	inDerived := false
+	for _, p := range derived {
+		if p == candidate.original {
+			inDerived = true
+			break
+		}
+	}
+	if !inDerived && candidate.original != "" {
+		compatPaths = append(compatPaths, candidate.original)
+	}
 	return MigrationCandidate{
 		Kind:              candidate.kind,
 		Name:              candidate.resource.Name,
 		Type:              candidate.resource.Type,
 		OriginalPath:      candidate.original,
 		CanonicalPath:     candidate.resource.Path,
-		Compatibility:     append([]string(nil), candidate.resource.Compatibility...),
+		Compatibility:     compatPaths,
 		Evidence:          append([]string(nil), candidate.evidence...),
 		RequiresMigration: candidate.requiresMigration,
 	}
@@ -1347,7 +1360,7 @@ func runGit(ctx context.Context, args ...string) (string, error) {
 }
 
 func ensureCompatibility(root string, agents []string, resource manifest.Resource) error {
-	for _, compat := range resource.EffectiveCompatibility(agents) {
+	for _, compat := range manifest.DerivedCompatibilityPaths(agents, resource) {
 		linkPath := filepath.Join(root, filepath.FromSlash(compat))
 		targetPath := filepath.Join(root, filepath.FromSlash(resource.Path))
 		if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
@@ -1448,7 +1461,7 @@ func localStatus(root string, agents []string, resource manifest.Resource) strin
 	if err := validateResolvedResource(filepath.Join(root, filepath.FromSlash(resource.Path)), resource); err != nil {
 		return "missing"
 	}
-	for _, compat := range resource.EffectiveCompatibility(agents) {
+	for _, compat := range manifest.DerivedCompatibilityPaths(agents, resource) {
 		if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(compat))); err != nil {
 			return "drifted"
 		}
@@ -1471,7 +1484,7 @@ func sortResources(resources []manifest.Resource) {
 }
 
 func removePaths(root string, agents []string, resource manifest.Resource) error {
-	for _, compat := range resource.EffectiveCompatibility(agents) {
+	for _, compat := range manifest.DerivedCompatibilityPaths(agents, resource) {
 		if err := os.RemoveAll(filepath.Join(root, filepath.FromSlash(compat))); err != nil {
 			return err
 		}

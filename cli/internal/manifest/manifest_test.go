@@ -74,6 +74,7 @@ func TestSaveUsesTwoSpaceIndent(t *testing.T) {
 		},
 		Dependencies: []Resource{},
 		Packages:     []Resource{},
+		// Entrypoints is deprecated and should be stripped on save.
 		Entrypoints: map[string]Entrypoint{
 			"generic": {
 				File: "AGENTS.md",
@@ -96,11 +97,7 @@ func TestSaveUsesTwoSpaceIndent(t *testing.T) {
 		"update_policy:\n" +
 		"  interval: 1d\n" +
 		"dependencies: []\n" +
-		"packages: []\n" +
-		"entrypoints:\n" +
-		"  generic:\n" +
-		"    file: AGENTS.md\n" +
-		"    mode: managed\n"
+		"packages: []\n"
 	if got != want {
 		t.Fatalf("Save() wrote unexpected YAML\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
