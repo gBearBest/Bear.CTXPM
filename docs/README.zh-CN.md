@@ -57,7 +57,7 @@ Bear.CTXPM v0.1 首先是一套协议，而不是一个必须先安装的工具�
 
 ### entrypoint
 
-`entrypoint` 指 agent 在扫描 `.ctxpm/...` 之前优先读取的根 Markdown 入口面。在共享入口模型下，`AGENTS.md` 是唯一 canonical 受管文件，`CLAUDE.md`、`ANTIGRAVITY.md` 等其他 agent 根入口文件则作为 compatibility symlink 回指到 `AGENTS.md`。Bear.CTXPM 通过 `AGENTS.md` 中的 `ctxpm` 受管区块提供统一的资源读取说明，并通过 `ctxpm.yaml` 声明当前项目启用了哪些 agent profile，以及哪些根入口文件名应解析到这份 canonical 内容。
+`entrypoint` 指 agent 在扫描 `.ctxpm/...` 之前优先读取的根 Markdown 入口面。在共享入口模型下，`.ctxpm/AGENTS.md` 是 canonical 受管源文件，`AGENTS.md`、`CLAUDE.md`、`ANTIGRAVITY.md` 等根入口文件则作为 compatibility symlink 直接指向 `.ctxpm/AGENTS.md`。Bear.CTXPM 通过 `.ctxpm/AGENTS.md` 中的 `ctxpm` 受管区块提供统一的资源读取说明，并通过 `ctxpm.yaml` 声明当前项目启用了哪些 agent profile，以及哪些根入口文件名应解析到这份 canonical 源内容。
 
 ## 推荐目录结构
 
@@ -67,6 +67,7 @@ Bear.CTXPM v0.1 推荐项目采用以下最小结构：
 project/
   ctxpm.yaml
   .ctxpm/
+    AGENTS.md
     dependencies/
       skills/
       rules/
@@ -81,9 +82,9 @@ project/
       prompts/
       memories/
       mcp/
-  AGENTS.md
-  CLAUDE.md -> AGENTS.md
-  ANTIGRAVITY.md -> AGENTS.md
+  AGENTS.md -> .ctxpm/AGENTS.md
+  CLAUDE.md -> .ctxpm/AGENTS.md
+  ANTIGRAVITY.md -> .ctxpm/AGENTS.md
 ```
 
 其中：
@@ -91,8 +92,8 @@ project/
 - `ctxpm.yaml`：由用户和 AI 共同维护的项目清单。
 - `.ctxpm/dependencies/`：外部资源工作区，默认应加入 `.gitignore`。
 - `.ctxpm/packages/`：项目内资源目录，默认应进入版本控制。
-- `AGENTS.md`：canonical 的共享根入口文件。
-- 其他根入口文件名：当某个已声明 agent 需要特定文件名时，回指到 `AGENTS.md` 的 compatibility symlink。
+- `.ctxpm/AGENTS.md`：canonical 的受管根入口源文件，内容实际存放在这里。
+- 根入口文件名（`AGENTS.md`、`CLAUDE.md` 等）：当某个已声明 agent 需要特定文件名时，直接指向 `.ctxpm/AGENTS.md` 的 compatibility symlink。
 
 ## 设计原则
 
@@ -109,11 +110,11 @@ project/
 
 当 AI 接管一个 Bear.CTXPM 项目时，建议遵循以下流程：
 
-1. 先读取 `AGENTS.md` 和 `ctxpm.yaml`，再根据 `ctxpm.yaml` 中声明的 agent profile 映射继续执行。
+1. 先读取 `AGENTS.md`（或任一根入口 symlink）和 `ctxpm.yaml`，再根据 `ctxpm.yaml` 中声明的 agent profile 映射继续执行。
 2. 优先扫描 `.ctxpm/packages/`，再扫描 `.ctxpm/dependencies/`。
 3. 结合 `ctxpm.yaml` 的显式声明和目录结构识别资源。
 4. 根据任务上下文判断需要查阅哪些资源，包括在任务依赖项目历史或既有决策时按需加载 `memory` 资源。
-5. 维护 `AGENTS.md` 中的 `ctxpm` 受管区块，并确保各 agent 的根入口 alias 始终与这份 canonical 文件同步。
+5. 维护 `.ctxpm/AGENTS.md` 中的 `ctxpm` 受管区块，并确保各 agent 的根入口 alias 始终与这份 canonical 源文件同步。
 6. 在无法安全完成操作时，报告问题并给出整理建议。
 
 ## v0.1 非目标

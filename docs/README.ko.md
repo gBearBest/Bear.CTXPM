@@ -57,7 +57,7 @@ resource type은 콘텐츠의 형태를 설명합니다. Bear.CTXPM v0.1의 표�
 
 ### entrypoint
 
-`entrypoint`는 agent가 `.ctxpm/...`를 읽기 전에 먼저 확인하는 루트 Markdown 엔트리 표면입니다. 공유 엔트리포인트 모델에서는 `AGENTS.md`가 유일한 canonical managed file이며, `CLAUDE.md`, `ANTIGRAVITY.md` 같은 agent별 루트 파일명은 `AGENTS.md`를 가리키는 compatibility symlink로 취급합니다. Bear.CTXPM은 `AGENTS.md` 안의 `ctxpm` 관리 블록으로 공통 리소스 읽기 지침을 제공하고, `ctxpm.yaml`로 어떤 agent profile이 활성화되어 있는지와 어떤 루트 파일명이 이 canonical 파일로 해석되어야 하는지를 선언합니다.
+`entrypoint`는 agent가 `.ctxpm/...`를 읽기 전에 먼저 확인하는 루트 Markdown 엔트리 표면입니다. 공유 엔트리포인트 모델에서는 `.ctxpm/AGENTS.md`가 canonical managed source file이며, `AGENTS.md`, `CLAUDE.md`, `ANTIGRAVITY.md` 같은 루트 파일명은 `.ctxpm/AGENTS.md`를 직접 가리키는 compatibility symlink로 취급합니다. Bear.CTXPM은 `.ctxpm/AGENTS.md` 안의 `ctxpm` 관리 블록으로 공통 리소스 읽기 지침을 제공하고, `ctxpm.yaml`로 어떤 agent profile이 활성화되어 있는지와 어떤 루트 파일명이 이 canonical source file로 해석되어야 하는지를 선언합니다.
 
 ## 권장 디렉터리 구조
 
@@ -67,6 +67,7 @@ Bear.CTXPM v0.1은 다음과 같은 최소 구조를 권장합니다.
 project/
   ctxpm.yaml
   .ctxpm/
+    AGENTS.md
     dependencies/
       skills/
       rules/
@@ -81,9 +82,9 @@ project/
       prompts/
       memories/
       mcp/
-  AGENTS.md
-  CLAUDE.md -> AGENTS.md
-  ANTIGRAVITY.md -> AGENTS.md
+  AGENTS.md -> .ctxpm/AGENTS.md
+  CLAUDE.md -> .ctxpm/AGENTS.md
+  ANTIGRAVITY.md -> .ctxpm/AGENTS.md
 ```
 
 각 항목의 의미는 다음과 같습니다.
@@ -91,8 +92,8 @@ project/
 - `ctxpm.yaml`: 사용자와 AI가 함께 유지 관리하는 프로젝트 manifest입니다.
 - `.ctxpm/dependencies/`: 외부 리소스 워크스페이스이며, 기본적으로 `.gitignore`에 추가해야 합니다.
 - `.ctxpm/packages/`: 프로젝트 내부 리소스 디렉터리이며, 기본적으로 버전 관리에 포함해야 합니다.
-- `AGENTS.md`: canonical shared 루트 엔트리포인트 파일입니다.
-- 기타 루트 엔트리포인트 파일명: 선언된 agent가 특정 파일명을 기대할 때 `AGENTS.md`로 되돌아가는 compatibility symlink입니다.
+- `.ctxpm/AGENTS.md`: canonical managed 루트 엔트리포인트 source 파일이며, 실제 내용은 여기에 저장됩니다.
+- 루트 엔트리포인트 파일명(`AGENTS.md`, `CLAUDE.md` 등): 선언된 agent가 특정 파일명을 기대할 때 `.ctxpm/AGENTS.md`를 직접 가리키는 compatibility symlink입니다.
 
 ## 설계 원칙
 
@@ -109,11 +110,11 @@ project/
 
 AI가 Bear.CTXPM 프로젝트를 맡을 때는 다음 흐름을 따르는 것이 좋습니다.
 
-1. 먼저 `AGENTS.md`와 `ctxpm.yaml`을 읽고, 이어서 `ctxpm.yaml`에 선언된 agent profile 매핑을 따릅니다.
+1. 먼저 `AGENTS.md`(또는 임의의 루트 엔트리포인트 symlink)와 `ctxpm.yaml`을 읽고, 이어서 `ctxpm.yaml`에 선언된 agent profile 매핑을 따릅니다.
 2. 먼저 `.ctxpm/packages/`를 스캔한 뒤, `.ctxpm/dependencies/`를 스캔합니다.
 3. `ctxpm.yaml`의 명시적 선언과 디렉터리 구조를 함께 사용해 리소스를 식별합니다.
 4. 작업 컨텍스트에 따라 어떤 리소스를 읽어야 하는지 판단합니다. 프로젝트 이력이나 기존 의사결정에 의존하는 작업에서는 `memory` 리소스도 필요에 따라 읽습니다.
-5. `AGENTS.md` 안의 `ctxpm` 관리 블록을 유지하고, agent별 루트 엔트리포인트 alias가 그 canonical 파일과 계속 동기화되도록 합니다.
+5. `.ctxpm/AGENTS.md` 안의 `ctxpm` 관리 블록을 유지하고, agent별 루트 엔트리포인트 alias가 그 canonical source file과 계속 동기화되도록 합니다.
 6. 안전하게 작업을 완료할 수 없을 때는 문제를 보고하고 정리 제안을 제공합니다.
 
 ## v0.1의 비목표

@@ -156,13 +156,13 @@ func validateManagedEntrypoints(root string, m *manifest.Manifest) []string {
 			issues = append(issues, err.Error())
 		case !state.HasManagedBlock:
 			sourceExists = true
-			issues = append(issues, fmt.Sprintf("managed entrypoint %q does not contain a ctxpm managed block", manifest.CanonicalEntrypointFile()))
+			issues = append(issues, fmt.Sprintf("managed entrypoint source %q does not contain a ctxpm managed block", manifest.CanonicalEntrypointSourceFile()))
 		case state.Damaged:
 			sourceExists = true
-			issues = append(issues, fmt.Sprintf("managed entrypoint %q has a damaged ctxpm managed block", manifest.CanonicalEntrypointFile()))
+			issues = append(issues, fmt.Sprintf("managed entrypoint source %q has a damaged ctxpm managed block", manifest.CanonicalEntrypointSourceFile()))
 		case strings.TrimRight(state.Block, "\n") != strings.TrimRight(manifest.ManagedEntrypoint(), "\n"):
 			sourceExists = true
-			issues = append(issues, fmt.Sprintf("managed entrypoint %q is out of date; run `ctxpm entrypoint sync`", manifest.CanonicalEntrypointFile()))
+			issues = append(issues, fmt.Sprintf("managed entrypoint source %q is out of date; run `ctxpm entrypoint sync`", manifest.CanonicalEntrypointSourceFile()))
 		default:
 			sourceExists = true
 		}
@@ -240,7 +240,7 @@ func entrypointMergeGuidance(files []string) string {
 	if len(items) == 1 {
 		label = "root entrypoint file"
 	}
-	return fmt.Sprintf("%s (%s) need manual migration; merge any unique instructions into %s, then rerun `ctxpm entrypoint sync` so the other root entrypoint filenames become compatibility symlinks", label, strings.Join(items, ", "), manifest.CanonicalEntrypointFile())
+	return fmt.Sprintf("%s (%s) need manual migration; merge any unique instructions into %s, then rerun `ctxpm entrypoint sync` so the root entrypoint filenames become compatibility symlinks", label, strings.Join(items, ", "), manifest.CanonicalEntrypointSourceFile())
 }
 
 func seedCanonicalEntrypoint(root string, m *manifest.Manifest) error {

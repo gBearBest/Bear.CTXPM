@@ -401,7 +401,7 @@ func TestInitGuidesMergeWhenMultipleLegacyEntrypointsExist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
-	if !containsIssue(result.Warnings, "merge any unique instructions into AGENTS.md") {
+	if !containsIssue(result.Warnings, "merge any unique instructions into .ctxpm/AGENTS.md") {
 		t.Fatalf("Init() warnings = %v", result.Warnings)
 	}
 }
@@ -943,7 +943,7 @@ func TestEntrypointDoctorGuidesMergeForRealAliasFile(t *testing.T) {
 	if result.OK {
 		t.Fatalf("EntrypointDoctor() OK = true, want false")
 	}
-	if !containsIssue(result.Issues, "merge any unique instructions into AGENTS.md") {
+	if !containsIssue(result.Issues, "merge any unique instructions into .ctxpm/AGENTS.md") {
 		t.Fatalf("EntrypointDoctor() issues = %v", result.Issues)
 	}
 }
