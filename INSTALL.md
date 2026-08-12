@@ -16,7 +16,7 @@ Your task is to organize the current project into a project that can sustainably
 Your execution goals:
 
 1. Identify which agent the user is currently using.
-2. Create or update the canonical shared root Markdown entrypoint file and any required agent-specific alias symlinks.
+2. Create or update the canonical shared root Markdown entrypoint source file at `.ctxpm/AGENTS.md` and any required root-level alias symlinks.
 3. Create and maintain `ctxpm.yaml`.
 4. Identify and migrate existing AI resources in the project.
 5. Move external AI resources into `.ctxpm/dependencies/`.
@@ -70,7 +70,7 @@ The mapping between agents and default root entrypoint filenames is:
 | `kiro` | `AGENTS.md` |
 | `generic` | `AGENTS.md` |
 
-In the shared-entrypoint model, `.ctxpm/AGENTS.md` is the canonical managed source file. All root-level entrypoint filenames (`AGENTS.md`, `CLAUDE.md`, `ANTIGRAVITY.md`, `GEMINI.md`) are symlinks that point directly to `.ctxpm/AGENTS.md` and should be kept out of version control via `.gitignore`.
+In the shared-entrypoint model, `.ctxpm/AGENTS.md` is the canonical managed source file. All root-level entrypoint filenames (`AGENTS.md`, `CLAUDE.md`, `ANTIGRAVITY.md`, `GEMINI.md`) are compatibility symlinks that point directly to `.ctxpm/AGENTS.md` and should be kept out of version control via `.gitignore`.
 
 ---
 
@@ -208,7 +208,7 @@ Follow these steps in order. Do not skip steps.
 
 1. Check for existing root entrypoint files.
 2. Ask the user which agent they currently use if necessary.
-3. Select the corresponding agent profile and canonicalize the shared root entrypoint onto `AGENTS.md`.
+3. Select the corresponding agent profile and canonicalize the shared root entrypoint source at `.ctxpm/AGENTS.md`, then repair any root-level alias symlinks.
 
 ### 5.2 Install or Prepare the Project-Local Companion `ctxpm` CLI
 
@@ -237,8 +237,8 @@ Recommended order:
 9. Treat the project-local `ctxpm init` result as the primary initialization action for deterministic setup work such as:
    - creating the canonical `.ctxpm/` directory skeleton
    - creating or updating `ctxpm.yaml`
-   - writing or repairing the managed shared root entrypoint block in `AGENTS.md`
-   - creating or repairing root entrypoint alias symlinks such as `CLAUDE.md -> AGENTS.md`
+   - writing or repairing the managed shared root entrypoint block in `.ctxpm/AGENTS.md`
+   - creating or repairing root entrypoint alias symlinks such as `AGENTS.md -> .ctxpm/AGENTS.md` and `CLAUDE.md -> .ctxpm/AGENTS.md`
    - installing or refreshing the bundled `ctxpm` dependency and local CLI path
    - adding baseline `.gitignore` rules
    - migrating resources that can be resolved safely by the tool
@@ -521,7 +521,7 @@ dependencies:
 
 ### 5.8 Write the Shared Root Markdown Entrypoint File
 
-Write or update the managed `ctxpm` block in `AGENTS.md`, then create or repair any agent-specific root entrypoint aliases that should point back to it.
+Write or update the managed `ctxpm` block in `.ctxpm/AGENTS.md`, then create or repair any root-level entrypoint aliases that should point back to it.
 
 The managed block must use the canonical template in
 [`resources/templates/ctxpm-managed-entrypoint.md`](resources/templates/ctxpm-managed-entrypoint.md).
@@ -535,13 +535,13 @@ Template rules:
 
 Canonical file rules:
 
-1. If `AGENTS.md` does not exist, create it.
-2. If `AGENTS.md` exists but has no managed block, insert one.
+1. If `.ctxpm/AGENTS.md` does not exist, create it.
+2. If `.ctxpm/AGENTS.md` exists but has no managed block, insert one.
 3. If the managed block already exists, update only the managed block and do not overwrite user content outside the block.
-4. If an old root entrypoint file such as `CLAUDE.md` exists as a real file and `AGENTS.md` does not yet exist, migrate that file into `AGENTS.md` before creating the alias symlink.
-5. After `AGENTS.md` is canonicalized, create symlinks for declared agent-specific root filenames such as `CLAUDE.md -> AGENTS.md` and `ANTIGRAVITY.md -> AGENTS.md`.
+4. If an old root entrypoint file such as `AGENTS.md` or `CLAUDE.md` exists as a real file and `.ctxpm/AGENTS.md` does not yet exist, migrate that file into `.ctxpm/AGENTS.md` before creating the alias symlink.
+5. After `.ctxpm/AGENTS.md` is canonicalized, create root-level symlinks for declared entrypoint filenames such as `AGENTS.md -> .ctxpm/AGENTS.md`, `CLAUDE.md -> .ctxpm/AGENTS.md`, and `ANTIGRAVITY.md -> .ctxpm/AGENTS.md`.
 6. If an alias path already exists as a real file with different non-managed content, stop and report the conflict instead of overwriting it silently.
-7. If multiple real root entrypoint files already exist at the same time, do not silently pick one. Report that AI should first merge any unique instructions from those files into `AGENTS.md`, then rerun `ctxpm entrypoint sync` to convert the remaining filenames into alias symlinks.
+7. If multiple real root entrypoint files already exist at the same time, do not silently pick one. Report that AI should first merge any unique instructions from those files into `.ctxpm/AGENTS.md`, then rerun `ctxpm entrypoint sync` to convert the remaining filenames into alias symlinks.
 
 ### 5.9 Install the Bundled External `ctxpm` Dependency
 
@@ -580,15 +580,16 @@ If it does not include the following rules, append them:
 
 Do not ignore `.ctxpm/packages/` by default because it is a project-local asset.
 
-Also ignore generated root entrypoint alias filenames that point back to `AGENTS.md`, such as:
+Also ignore generated root entrypoint alias filenames that point back to `.ctxpm/AGENTS.md`, such as:
 
 ```gitignore
+AGENTS.md
 CLAUDE.md
 ANTIGRAVITY.md
 GEMINI.md
 ```
 
-Do not ignore `AGENTS.md`, because it is the canonical managed root entrypoint file.
+Do not ignore `.ctxpm/AGENTS.md`, because it is the canonical managed root entrypoint source file.
 
 For original AI resource paths that were replaced by compatibility symlinks or compatibility facades, choose the smallest safe `.gitignore` rule that covers the compatibility surface without hiding real project-owned files.
 
@@ -701,8 +702,8 @@ After completion, the project should at least satisfy:
 1. `ctxpm.yaml` exists.
 2. `.ctxpm/packages/` exists.
 3. `.ctxpm/dependencies/` exists.
-4. `AGENTS.md` exists as the canonical shared root entrypoint file.
-5. `AGENTS.md` contains a managed `ctxpm` block.
+4. `.ctxpm/AGENTS.md` exists as the canonical shared root entrypoint source file.
+5. `.ctxpm/AGENTS.md` contains a managed `ctxpm` block.
 6. Existing AI resources have been organized as `package` or `dependency` as much as possible.
 7. `.gitignore` ignores both `.ctxpm/dependencies/` and `.ctxpm/state/`.
 8. `.ctxpm/dependencies/skills/ctxpm/SKILL.md` exists and is recorded in `ctxpm.yaml`.
@@ -711,7 +712,7 @@ After completion, the project should at least satisfy:
 11. When the project-local CLI was available, the project-local `ctxpm init` workflow has been executed instead of relying on purely manual AI bootstrapping for deterministic steps.
 12. Compatibility symlinks for managed resources exist in each confirmed agent's recognizable discovery directories for the corresponding resource types.
 13. Compatibility symlinks for `ctxpm` exist in every confirmed agent's default skill discovery directories, derived automatically from the declared `agents`.
-14. Agent-specific root entrypoint aliases such as `CLAUDE.md`, `ANTIGRAVITY.md`, or `GEMINI.md` point back to `AGENTS.md` when those agent profiles are declared.
+14. Root-level entrypoint aliases such as `AGENTS.md`, `CLAUDE.md`, `ANTIGRAVITY.md`, or `GEMINI.md` point back to `.ctxpm/AGENTS.md` when those agent profiles are declared.
 15. The managed entrypoint block uses the canonical `ctxpm` template and instructs future AI agents to use `ctxpm` or the same `ctxpm` workflow before creating, reading, updating, or deleting AI resources.
 16. Future AI resources continue to be managed using the same `ctxpm` rules instead of agent default install locations.
 17. External dependencies installed from GitHub or direct URLs record hash-based `version` values in `ctxpm.yaml` for future update detection.

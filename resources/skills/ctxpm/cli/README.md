@@ -227,8 +227,8 @@ ctxpm remove <name> [--delete-files | --keep-files] [--json]
 
 | Flag | Description |
 |---|---|
-| `--delete-files` | Delete canonical files and compatibility symlinks from disk. |
-| `--keep-files` | Leave canonical files on disk (default behavior when neither flag is set). |
+| `--delete-files` | Delete canonical `.ctxpm` resource files and any compatibility symlinks from disk. |
+| `--keep-files` | Leave canonical `.ctxpm` resource files on disk (default behavior when neither flag is set). |
 | `--json` | Emit JSON output. |
 
 `--delete-files` and `--keep-files` are mutually exclusive. When neither is specified, files are kept.

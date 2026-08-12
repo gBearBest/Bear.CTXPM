@@ -96,7 +96,7 @@ func detectInitAgent(root string, requested string, m *manifest.Manifest) initDi
 		sort.Strings(files)
 		return initDiscovery{
 			agent:            "generic",
-			warnings:         []string{fmt.Sprintf("multiple existing root entrypoints were found (%s); merge any unique instructions into %s, then rerun `ctxpm entrypoint sync` so the other root entrypoint filenames can be converted into compatibility symlinks", strings.Join(files, ", "), manifest.CanonicalEntrypointFile())},
+			warnings:         []string{fmt.Sprintf("multiple existing root entrypoints were found (%s); merge any unique instructions into %s, then rerun `ctxpm entrypoint sync` so the root entrypoint filenames can be converted into compatibility symlinks", strings.Join(files, ", "), manifest.CanonicalEntrypointSourceFile())},
 			evidence:         []string{fmt.Sprintf("detected multiple existing root entrypoints: %s", strings.Join(files, ", "))},
 			entrypointSource: "ambiguous-root-entrypoints",
 		}

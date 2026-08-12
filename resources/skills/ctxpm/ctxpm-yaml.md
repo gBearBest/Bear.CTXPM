@@ -297,4 +297,4 @@ When modifying `ctxpm.yaml`:
 4. Keep paths relative to the project root.
 5. Keep `dependencies` and `packages` semantically separate.
 6. Prefer minimal text edits over full-file rewrites when only a small field changes.
-7. Do not add `compatibility` or `entrypoints` fields — they are not part of the schema. Compatibility paths are derived automatically; entrypoints always use `AGENTS.md + managed`.
+7. Do not add `compatibility` or `entrypoints` fields — they are not part of the schema. Compatibility paths are derived automatically; entrypoints always use `.ctxpm/AGENTS.md` as the managed source plus root-level alias symlinks.

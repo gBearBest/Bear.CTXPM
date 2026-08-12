@@ -56,6 +56,7 @@ type InitResult struct {
 	DryRun                     bool     `json:"dry_run"`
 	Agent                      string   `json:"agent"`
 	EntrypointFile             string   `json:"entrypoint_file"`
+	EntrypointSourceFile       string   `json:"entrypoint_source_file"`
 	PackagesCreated            []string `json:"packages_created,omitempty"`
 	DependenciesCreated        []string `json:"dependencies_created,omitempty"`
 	MigratedResources          []string `json:"migrated_resources,omitempty"`
@@ -78,7 +79,8 @@ func (r InitResult) Text() string {
 	lines := []string{
 		fmt.Sprintf("Initialized ctxpm project (%s)", ternary(r.DryRun, "dry-run", "applied")),
 		fmt.Sprintf("Agent: %s", r.Agent),
-		fmt.Sprintf("Entrypoint: %s", r.EntrypointFile),
+		fmt.Sprintf("Entrypoint source: %s", r.EntrypointSourceFile),
+		fmt.Sprintf("Root entrypoint alias: %s", r.EntrypointFile),
 		fmt.Sprintf("Manifest: %s", r.ManifestPath),
 	}
 	lines = append(lines, fmt.Sprintf("ctxpm dependency: %s", fallbackString(r.CtxpmDependencyStatus, "unchanged")))
@@ -275,6 +277,7 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 		DryRun:                     opts.DryRun,
 		Agent:                      opts.Agent,
 		EntrypointFile:             manifest.CanonicalEntrypointFile(),
+		EntrypointSourceFile:       manifest.CanonicalEntrypointSourceFile(),
 		PackagesCreated:            resourceNames(resourcePlan.packages),
 		DependenciesCreated:        dedupe(append(resourceNames(resourcePlan.dependencies), "ctxpm")),
 		MigratedResources:          resourcePlan.migrated,
