@@ -356,8 +356,8 @@ func runRemove(app *engine.App, args []string) error {
 	args = reorderArgs(args, map[string]bool{})
 	fs := flag.NewFlagSet("remove", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	deleteFiles := fs.Bool("delete-files", false, "Delete canonical files and compatibility symlinks")
-	keepFiles := fs.Bool("keep-files", false, "Leave canonical files on disk")
+	deleteFiles := fs.Bool("delete-files", false, "Delete canonical .ctxpm resource files and compatibility symlinks")
+	keepFiles := fs.Bool("keep-files", false, "Leave canonical .ctxpm resource files on disk")
 	jsonOutput := fs.Bool("json", false, "Emit JSON output")
 	if err := fs.Parse(args); err != nil {
 		return err

@@ -57,7 +57,7 @@ resource type は、コンテンツの形態を表します。Bear.CTXPM v0.1 �
 
 ### entrypoint
 
-`entrypoint` は、agent が `.ctxpm/...` を読む前に最初に確認するルート Markdown エントリー面です。共有エントリーポイントモデルでは、`AGENTS.md` が唯一の canonical managed file になり、`CLAUDE.md` や `ANTIGRAVITY.md` などの agent ごとのルートファイル名は `AGENTS.md` を指す compatibility symlink として扱います。Bear.CTXPM は `AGENTS.md` 内の `ctxpm` 管理ブロックで共通のリソース読み取り手順を提供し、`ctxpm.yaml` で有効な agent profile と canonical ファイルへ解決すべき互換ルート名を宣言します。
+`entrypoint` は、agent が `.ctxpm/...` を読む前に最初に確認するルート Markdown エントリー面です。共有エントリーポイントモデルでは、`.ctxpm/AGENTS.md` が canonical managed source file であり、`AGENTS.md`、`CLAUDE.md`、`ANTIGRAVITY.md` などのルートファイル名は `.ctxpm/AGENTS.md` を直接指す compatibility symlink として扱います。Bear.CTXPM は `.ctxpm/AGENTS.md` 内の `ctxpm` 管理ブロックで共通のリソース読み取り手順を提供し、`ctxpm.yaml` で有効な agent profile と、その canonical source file へ解決すべき互換ルート名を宣言します。
 
 ## 推奨ディレクトリ構造
 
@@ -67,6 +67,7 @@ Bear.CTXPM v0.1 では、次の最小構成を推奨します。
 project/
   ctxpm.yaml
   .ctxpm/
+    AGENTS.md
     dependencies/
       skills/
       rules/
@@ -81,9 +82,9 @@ project/
       prompts/
       memories/
       mcp/
-  AGENTS.md
-  CLAUDE.md -> AGENTS.md
-  ANTIGRAVITY.md -> AGENTS.md
+  AGENTS.md -> .ctxpm/AGENTS.md
+  CLAUDE.md -> .ctxpm/AGENTS.md
+  ANTIGRAVITY.md -> .ctxpm/AGENTS.md
 ```
 
 各要素の意味は次のとおりです。
@@ -91,8 +92,8 @@ project/
 - `ctxpm.yaml`: ユーザーと AI が共同で保守するプロジェクトマニフェスト。
 - `.ctxpm/dependencies/`: 外部リソースのワークスペース。デフォルトでは `.gitignore` に追加するべきです。
 - `.ctxpm/packages/`: プロジェクト内リソースのディレクトリ。デフォルトではバージョン管理に含めるべきです。
-- `AGENTS.md`: canonical な共有ルートエントリーポイントファイル。
-- その他のルートエントリーポイント名: 宣言済み agent が特定のファイル名を期待する場合に `AGENTS.md` へ戻る compatibility symlink。
+- `.ctxpm/AGENTS.md`: canonical な管理対象ルートエントリーポイントのソースファイルで、内容はここに保存されます。
+- ルートエントリーポイント名（`AGENTS.md`、`CLAUDE.md` など）: 宣言済み agent が特定のファイル名を期待する場合に、`.ctxpm/AGENTS.md` を直接指す compatibility symlink。
 
 ## 設計原則
 
@@ -109,11 +110,11 @@ project/
 
 AI が Bear.CTXPM プロジェクトを引き継ぐときは、次の流れに従うことを推奨します。
 
-1. まず `AGENTS.md` と `ctxpm.yaml` を読み、その後 `ctxpm.yaml` に記録された agent profile の対応関係に従う。
+1. まず `AGENTS.md`（または任意のルートエントリーポイント symlink）と `ctxpm.yaml` を読み、その後 `ctxpm.yaml` に記録された agent profile の対応関係に従う。
 2. まず `.ctxpm/packages/` をスキャンし、その後 `.ctxpm/dependencies/` をスキャンする。
 3. `ctxpm.yaml` の明示的な宣言とディレクトリ構造を組み合わせてリソースを識別する。
 4. タスクのコンテキストに応じて、読む必要があるリソースを判断する。プロジェクトの履歴や過去の判断に依存するタスクでは、`memory` リソースも必要に応じて読み込む。
-5. `AGENTS.md` 内の `ctxpm` 管理ブロックを保守し、agent ごとのルートエントリーポイント alias をその canonical ファイルへ同期し続ける。
+5. `.ctxpm/AGENTS.md` 内の `ctxpm` 管理ブロックを保守し、agent ごとのルートエントリーポイント alias をその canonical source file へ同期し続ける。
 6. 安全に操作を完了できない場合は、問題を報告し、整理案を提示する。
 
 ## v0.1 の非目標
