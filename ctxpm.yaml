@@ -3,6 +3,7 @@ project:
   name: Bear.CTXPM
 agents:
   - generic
+  - claude-code
 update_policy:
   enabled: true
   interval: 1d
