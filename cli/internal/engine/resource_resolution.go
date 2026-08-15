@@ -73,13 +73,13 @@ func (a *App) resolveGitResource(ctx context.Context, resource manifest.Resource
 	case targetVersion != "":
 		// Pinned commit SHA: can't shallow-clone (SHA may not be at HEAD),
 		// but --filter=blob:none skips all file content until checkout.
-		cloneArgs = []string{"clone", "--filter=blob:none", "--quiet", resource.Source.URL, repoDir}
+		cloneArgs = []string{"clone", "--filter=blob:none", "--no-checkout", "--quiet", resource.Source.URL, repoDir}
 	case ref != "":
 		// Known branch or tag: shallow-clone that ref directly.
-		cloneArgs = []string{"clone", "--depth", "1", "--single-branch", "--filter=blob:none", "--branch", ref, "--quiet", resource.Source.URL, repoDir}
+		cloneArgs = []string{"clone", "--depth", "1", "--single-branch", "--filter=blob:none", "--branch", ref, "--no-checkout", "--quiet", resource.Source.URL, repoDir}
 	default:
 		// Default branch, no pinning: fastest path.
-		cloneArgs = []string{"clone", "--depth", "1", "--single-branch", "--filter=blob:none", "--quiet", resource.Source.URL, repoDir}
+		cloneArgs = []string{"clone", "--depth", "1", "--single-branch", "--filter=blob:none", "--no-checkout", "--quiet", resource.Source.URL, repoDir}
 	}
 
 	if _, err := runGit(ctx, cloneArgs...); err != nil {
@@ -87,8 +87,26 @@ func (a *App) resolveGitResource(ctx context.Context, resource manifest.Resource
 		return nil, err
 	}
 
+	// Configure sparse-checkout to only extract the needed path
+	sourcePath := filepath.FromSlash(resource.Source.Path)
+	if _, err := runGit(ctx, "-C", repoDir, "sparse-checkout", "init", "--cone"); err != nil {
+		cleanup()
+		return nil, err
+	}
+	if _, err := runGit(ctx, "-C", repoDir, "sparse-checkout", "set", sourcePath); err != nil {
+		cleanup()
+		return nil, err
+	}
+
+	// Checkout only the sparse paths
 	if targetVersion != "" {
 		if _, err := runGit(ctx, "-C", repoDir, "checkout", "--quiet", targetVersion); err != nil {
+			cleanup()
+			return nil, err
+		}
+	} else {
+		// Explicit checkout needed because we used --no-checkout
+		if _, err := runGit(ctx, "-C", repoDir, "checkout", "--quiet"); err != nil {
 			cleanup()
 			return nil, err
 		}
