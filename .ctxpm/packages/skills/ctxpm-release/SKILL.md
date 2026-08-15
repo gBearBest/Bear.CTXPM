@@ -99,13 +99,22 @@ If the change is docs-only and the user explicitly says not to run these again, 
 git push -u origin release/v0.1.0
 ```
 
-### 5. Finish the release into `main`
+### 5. Create and push the stable tag on the release branch
+
+**IMPORTANT**: Tag the release branch BEFORE merging to main, so both main and develop can see the tag after completion.
+
+```sh
+git switch release/v0.1.0
+git tag -a v0.1.0 -m "Bear.CTXPM v0.1.0"
+git push origin v0.1.0
+```
+
+### 6. Merge the tagged release branch into `main`
 
 Preferred model when branch protection or review is enabled:
 
 1. open a PR from `release/v0.1.0` into `main`
 2. merge it with a merge commit after approval
-3. pull the resulting `main` commit locally before tagging
 
 Equivalent direct git commands:
 
@@ -115,15 +124,6 @@ git pull --ff-only origin main
 git merge --no-ff release/v0.1.0 -m "Merge release/v0.1.0 into main"
 git push origin main
 ```
-
-### 6. Create and push the final stable tag from `main`
-
-```sh
-git tag -a v0.1.0 -m "Bear.CTXPM v0.1.0" main
-git push origin v0.1.0
-```
-
-Do not tag from `develop`. In Git Flow, stable tags are created from `main` after the release-branch merge.
 
 ### 7. Back-merge the same release branch into `develop`
 
@@ -148,7 +148,21 @@ git branch -d release/v0.1.0
 git push origin --delete release/v0.1.0
 ```
 
-### 9. Wait for the GitHub Actions release workflow
+### 9. Verify tag visibility from both branches
+
+Confirm the tag is reachable from both main and develop:
+
+```sh
+git fetch --tags origin
+git switch main
+git tag --merged | grep v0.1.0
+git switch develop
+git tag --merged | grep v0.1.0
+```
+
+Both commands should show `v0.1.0`. If develop doesn't show it, the tag was created on the wrong commit.
+
+### 10. Wait for the GitHub Actions release workflow
 
 The release workflow will:
 
@@ -165,7 +179,7 @@ The release workflow will:
 
 Pre-release tags should not advance `latest`.
 
-### 10. Update the GitHub Release notes
+### 11. Update the GitHub Release notes
 
 After the release appears, replace the default generated notes with a curated body.
 
@@ -210,7 +224,7 @@ If GitHub CLI is available, a practical edit command is:
 gh release edit v0.1.0 --notes-file /path/to/release-notes.md
 ```
 
-### 11. Verify published results
+### 12. Verify published results
 
 Confirm all of the following:
 
@@ -219,6 +233,7 @@ Confirm all of the following:
 - stable releases are not marked as pre-release
 - expected assets are uploaded
 - `latest` points at the same commit as the stable tag
+- **the tag is visible from both `main` and `develop` branches**
 
 Useful checks:
 
@@ -226,6 +241,8 @@ Useful checks:
 git fetch --tags --force origin
 git rev-list -n 1 v0.1.0
 git rev-list -n 1 latest
+git switch main && git tag --merged | grep v0.1.0
+git switch develop && git tag --merged | grep v0.1.0
 gh release view v0.1.0 --json tagName,isDraft,isPrerelease,assets,url
 ```
 
@@ -275,10 +292,11 @@ For urgent production fixes:
 1. branch from `main`: `hotfix/vX.Y.Z`
 2. apply only the urgent fix plus any necessary release-hardening updates
 3. run the same validation commands used for stable releases
-4. merge hotfix into `main`
-5. create and push the annotated stable tag from `main`
-6. merge the same hotfix branch back into `develop`
-7. delete the hotfix branch after both merges complete
+4. push the hotfix branch
+5. create and push the annotated stable tag on the hotfix branch
+6. merge the tagged hotfix branch into `main`
+7. merge the same hotfix branch back into `develop`
+8. delete the hotfix branch after both merges complete
 
 Example:
 
@@ -293,13 +311,13 @@ git switch -c hotfix/v0.1.1
 
 git push -u origin hotfix/v0.1.1
 
+git tag -a v0.1.1 -m "Bear.CTXPM v0.1.1"
+git push origin v0.1.1
+
 git switch main
 git pull --ff-only origin main
 git merge --no-ff hotfix/v0.1.1 -m "Merge hotfix/v0.1.1 into main"
 git push origin main
-
-git tag -a v0.1.1 -m "Bear.CTXPM v0.1.1" main
-git push origin v0.1.1
 
 git switch develop
 git pull --ff-only origin develop
@@ -329,15 +347,30 @@ Right:
 ```sh
 git switch -c release/v0.1.0 develop
 git push -u origin release/v0.1.0
+git tag -a v0.1.0 -m "Bear.CTXPM v0.1.0"
+git push origin v0.1.0
+git switch main
+git merge --no-ff release/v0.1.0
+git push origin main
+git switch develop
+git merge --no-ff release/v0.1.0
+git push origin develop
+```
+
+Wrong:
+
+```sh
 git switch main
 git merge --no-ff release/v0.1.0
 git push origin main
 git tag -a v0.1.0 -m "Bear.CTXPM v0.1.0" main
 git push origin v0.1.0
-git switch develop
-git merge --no-ff release/v0.1.0
-git push origin develop
 ```
+
+Why wrong:
+
+- tagging on `main` after the merge means the tag is on the merge commit, not on the release branch
+- when the release branch merges back to `develop`, the tag is not visible from `develop`
 
 Wrong:
 
@@ -377,6 +410,8 @@ Right:
 - `latest` is maintained by the release workflow as the moving stable tag; release operators should verify it after every stable publication.
 - The project owner wants the release workflow preserved as a project-level skill rather than as general version-controlled documentation pages.
 - Git Flow is the canonical release model:
-  stable release: `develop` -> `release/*` -> merge to `main` -> tag stable -> back-merge to `develop`
+  stable release: `develop` -> `release/*` -> **tag on `release/*`** -> merge to `main` -> back-merge to `develop`
   pre-release: `develop` -> `release/*` -> tag `-rc.N` on `release/*` -> finish to `main` only when ready for stable
-  hotfix: `main` -> `hotfix/*` -> merge to `main` -> tag stable -> back-merge to `develop`
+  hotfix: `main` -> `hotfix/*` -> **tag on `hotfix/*`** -> merge to `main` -> back-merge to `develop`
+- Tags must be created on the release/hotfix branch BEFORE merging to main, so that both `main` and `develop` can see the tag after the back-merge completes.
+- **Critical mistake**: tagging `main` after merging creates the tag on the merge commit, making it invisible to `develop` after back-merge. Always tag the branch, not the merge result.
