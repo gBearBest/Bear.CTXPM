@@ -101,8 +101,9 @@ jobs:
 
           pushd cli >/dev/null
           make generate
+          VERSION="${{ needs.release-metadata.outputs.release_tag }}"
           CGO_ENABLED=0 GOOS="${{ matrix.goos }}" GOARCH="${{ matrix.goarch }}" \
-            go build -trimpath -ldflags="-s -w" -o "$STAGING_DIR/${{ matrix.binary_name }}" .
+            go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o "$STAGING_DIR/${{ matrix.binary_name }}" .
           popd >/dev/null
 
           if [ "${{ matrix.archive_ext }}" = "zip" ]; then
