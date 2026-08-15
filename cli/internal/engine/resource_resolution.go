@@ -61,22 +61,34 @@ func (a *App) resolveGitResource(ctx context.Context, resource manifest.Resource
 	cleanup := func() { _ = os.RemoveAll(tmpDir) }
 
 	repoDir := filepath.Join(tmpDir, "repo")
-	if _, err := runGit(ctx, "clone", "--quiet", resource.Source.URL, repoDir); err != nil {
-		cleanup()
-		return nil, err
-	}
 
 	targetVersion := strings.TrimSpace(opts.VersionOverride)
 	if targetVersion == "" && opts.UseRecordedVersion {
 		targetVersion = strings.TrimSpace(resource.Version)
 	}
+	ref := strings.TrimSpace(resource.Source.Ref)
+
+	var cloneArgs []string
+	switch {
+	case targetVersion != "":
+		// Pinned commit SHA: can't shallow-clone (SHA may not be at HEAD),
+		// but --filter=blob:none skips all file content until checkout.
+		cloneArgs = []string{"clone", "--filter=blob:none", "--quiet", resource.Source.URL, repoDir}
+	case ref != "":
+		// Known branch or tag: shallow-clone that ref directly.
+		cloneArgs = []string{"clone", "--depth", "1", "--single-branch", "--filter=blob:none", "--branch", ref, "--quiet", resource.Source.URL, repoDir}
+	default:
+		// Default branch, no pinning: fastest path.
+		cloneArgs = []string{"clone", "--depth", "1", "--single-branch", "--filter=blob:none", "--quiet", resource.Source.URL, repoDir}
+	}
+
+	if _, err := runGit(ctx, cloneArgs...); err != nil {
+		cleanup()
+		return nil, err
+	}
+
 	if targetVersion != "" {
 		if _, err := runGit(ctx, "-C", repoDir, "checkout", "--quiet", targetVersion); err != nil {
-			cleanup()
-			return nil, err
-		}
-	} else if strings.TrimSpace(resource.Source.Ref) != "" {
-		if _, err := runGit(ctx, "-C", repoDir, "checkout", "--quiet", resource.Source.Ref); err != nil {
 			cleanup()
 			return nil, err
 		}
