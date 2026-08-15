@@ -11,4 +11,11 @@
 .ctxpm/state/
 .agents/skills/
 .agents/rules/
+.claude/skills/
+.claude/rules/
+.claude/specs/
+.claude/prompts/
+.claude/memories/
+.claude/mcp/
 /AGENTS.md
+/CLAUDE.md
