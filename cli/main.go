@@ -96,6 +96,8 @@ func run(args []string) error {
 		return runUpdate(app, args[1:])
 	case "remove":
 		return runRemove(app, args[1:])
+	case "self-update":
+		return runSelfUpdate(app, args[1:])
 	case "memory":
 		return runMemory(app, args[1:])
 	default:
@@ -489,6 +491,28 @@ func runMemoryPrune(app *engine.App, args []string) error {
 	return printMaybeJSON(result, *jsonOutput)
 }
 
+func runSelfUpdate(app *engine.App, args []string) error {
+	fs := flag.NewFlagSet("self-update", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	version := fs.String("version", "latest", "Target version to install (default: latest)")
+	dryRun := fs.Bool("dry-run", false, "Report what would be done without making changes")
+	force := fs.Bool("force", false, "Force reinstall even if already at the target version")
+	jsonOutput := fs.Bool("json", false, "Emit JSON output")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	result, err := app.SelfUpdate(context.Background(), engine.SelfUpdateOptions{
+		Version: *version,
+		DryRun:  *dryRun,
+		Force:   *force,
+	})
+	if err != nil {
+		return err
+	}
+	return printMaybeJSON(result, *jsonOutput)
+}
+
 func printMaybeJSON(value any, jsonOutput bool) error {
 	if jsonOutput {
 		encoder := json.NewEncoder(os.Stdout)
@@ -528,6 +552,7 @@ func printHelp(w *os.File) {
 		"  check-updates  Check whether dependencies have upstream updates",
 		"  update         Apply dependency updates, rewrite manifest versions, and install resources",
 		"  remove         Remove a dependency or package",
+		"  self-update    Update the ctxpm CLI to the latest released version",
 		"",
 		"Examples:",
 		"  ctxpm --version",
