@@ -7,10 +7,12 @@ GO := $(shell if [ -x /usr/local/go/bin/go ]; then printf /usr/local/go/bin/go; 
 generate:
 	cd ./internal && $(GO) generate ./...
 
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "devel")
+
 build:
 	mkdir -p ./bin
 	$(MAKE) generate
-	$(GO) build -o $(BINARY) .
+	$(GO) build -ldflags "-X main.version=$(VERSION)" -o $(BINARY) .
 
 test:
 	$(MAKE) generate
