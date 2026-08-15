@@ -15,6 +15,8 @@ import (
 	"github.com/gBearBest/Bear.CTXPM/cli/internal/manifest"
 )
 
+var version string
+
 type commandError struct {
 	message string
 	code    int
@@ -550,26 +552,32 @@ func runVersion() error {
 }
 
 func cliVersion() string {
+	ver := strings.TrimSpace(version)
 	info, ok := debug.ReadBuildInfo()
-	if !ok {
-		return "unknown"
+	if ver == "" {
+		if !ok {
+			return "unknown"
+		}
+		ver = strings.TrimSpace(info.Main.Version)
+		if ver == "" {
+			ver = "devel"
+		}
 	}
-	version := strings.TrimSpace(info.Main.Version)
-	if version == "" {
-		version = "devel"
+	if !ok {
+		return ver
 	}
 	revision := buildInfoSetting(info.Settings, "vcs.revision")
 	if revision == "" {
-		return version
+		return ver
 	}
 	short := revision
 	if len(short) > 12 {
 		short = short[:12]
 	}
 	if buildInfoSetting(info.Settings, "vcs.modified") == "true" {
-		return fmt.Sprintf("%s+%s-dirty", version, short)
+		return fmt.Sprintf("%s+%s-dirty", ver, short)
 	}
-	return fmt.Sprintf("%s+%s", version, short)
+	return fmt.Sprintf("%s+%s", ver, short)
 }
 
 func buildInfoSetting(settings []debug.BuildSetting, key string) string {
