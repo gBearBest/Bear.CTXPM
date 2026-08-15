@@ -179,14 +179,24 @@ The release workflow will:
 
 Pre-release tags should not advance `latest`.
 
-### 11. Update the GitHub Release notes
+**The workflow takes 1–3 minutes to complete after the tag is pushed.** Do not attempt to update the release notes before the GitHub Release object exists — `gh release edit` will fail on a non-existent release.
 
-After the release appears, replace the default generated notes with a curated body.
+After pushing the tag, wait ~90 seconds before polling:
 
-Recommended structure:
+```sh
+sleep 90
+gh release view vX.Y.Z --repo gBearBest/Bear.CTXPM --json tagName,isDraft,isPrerelease 2>&1
+```
 
-~~~md
-## Bear.CTXPM v0.1.0
+If the release is not yet available, wait another 30 seconds and retry. Do not proceed to step 11 until `gh release view` returns without error.
+
+### 11. Write and apply curated release notes
+
+**Write the notes file first** (before the release exists if you like — the file is just local):
+
+```sh
+cat > /tmp/release-notes-vX.Y.Z.md << 'EOF'
+## Bear.CTXPM vX.Y.Z
 
 Short summary of what this version represents.
 
@@ -207,21 +217,22 @@ curl -fsSL https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/latest/cli/ins
 Pin this release:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/latest/cli/install.sh | sh -s -- --scope global --version v0.1.0
+curl -fsSL https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/latest/cli/install.sh | sh -s -- --scope global --version vX.Y.Z
 ```
 
 ## Release assets
 
-- platform archives
-- checksum file
-~~~
+See attached archives and `checksums.txt` below.
+EOF
+```
 
-Focus the notes on what users need to know, not on a raw commit dump.
+Focus on what users need to know, not a raw commit dump.
 
-If GitHub CLI is available, a practical edit command is:
+**Once the release exists**, apply the notes and clean up:
 
 ```sh
-gh release edit v0.1.0 --notes-file /path/to/release-notes.md
+gh release edit vX.Y.Z --repo gBearBest/Bear.CTXPM --notes-file /tmp/release-notes-vX.Y.Z.md
+rm /tmp/release-notes-vX.Y.Z.md
 ```
 
 ### 12. Verify published results
@@ -415,3 +426,5 @@ Right:
   hotfix: `main` -> `hotfix/*` -> **tag on `hotfix/*`** -> merge to `main` -> back-merge to `develop`
 - Tags must be created on the release/hotfix branch BEFORE merging to main, so that both `main` and `develop` can see the tag after the back-merge completes.
 - **Critical mistake**: tagging `main` after merging creates the tag on the merge commit, making it invisible to `develop` after back-merge. Always tag the branch, not the merge result.
+- **Release notes must be applied before the session ends.** v0.1.10, v0.1.11, and v0.1.12 all shipped with only auto-generated notes because this step was skipped. Always write the notes file and run `gh release edit` as part of the same session that publishes the tag — do not defer it.
+- The GitHub Actions workflow takes 1–3 minutes after the tag push before the Release object exists. Wait ~90 seconds and poll with `gh release view` before attempting `gh release edit`; editing a non-existent release fails silently or errors.
