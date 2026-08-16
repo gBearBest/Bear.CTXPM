@@ -20,6 +20,18 @@ dependencies:
       path: resources/skills/ctxpm
       entry: SKILL.md
     version: 35538b24d1333a09ba0ed4de097a40ea81c54d9d
+  - name: git-commit
+    type: skill
+    layout: dir
+    path: .ctxpm/dependencies/skills/git-commit
+    entry: SKILL.md
+    source:
+      type: git
+      url: https://github.com/github/awesome-copilot.git
+      path: skills/git-commit
+      ref: main
+      entry: SKILL.md
+    version: a80885b76044550770f60f360f8a0e5ae3524a31
 packages:
   - name: ctxpm-release
     type: skill
