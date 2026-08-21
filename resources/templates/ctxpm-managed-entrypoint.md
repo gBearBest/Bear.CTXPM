@@ -1,7 +1,7 @@
 <!-- ctxpm:begin -->
 This project uses `ctxpm` to manage AI resources. For detailed lifecycle work, first use the bundled `ctxpm` skill at `.ctxpm/dependencies/skills/ctxpm/SKILL.md`. Manage `rules`, `skills`, `specs`, `prompts`, `mcp`, and `memories` through `ctxpm`.
 
-`ctxpm.yaml` is the canonical source for agent profiles, entrypoint mappings, and compatibility paths. During normal AI work, prefer `ctxpm detect` over `ctxpm check-updates`; if unmanaged resources are found outside `.ctxpm`, ask before migrating, then run `ctxpm migrate` and `ctxpm validate`.
+`ctxpm.yaml` is the canonical source for agent profiles, entrypoint mappings, compatibility paths, and `update_policy`. During normal AI work, prefer `ctxpm detect` over `ctxpm check-updates` when looking for unmanaged resources. For dependency updates, check `update_policy` at a session boundary; if checks are enabled and due, ask the user to confirm, then prefer the bundled `ctxpm` CLI to run `check-updates` and `update` rather than editing resources by hand.
 
 Read resources in this order: `ctxpm.yaml`, then relevant `.ctxpm/packages/` resources, then `.ctxpm/dependencies/`. Within each root, use this priority: `rules`, `skills`, `specs`, `prompts`, `mcp`. Read `memories` only when task context requires them. On conflicts, `packages` override `dependencies`, and `rules` override `memories`.
 

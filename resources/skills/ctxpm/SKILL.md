@@ -100,6 +100,12 @@ Run `ctxpm detect` on a shorter cadence than `ctxpm check-updates` so newly adde
 
 If the CLI is unavailable, follow the same protocol manually instead of inventing a partial workflow.
 
+## Conversational Update Workflow
+
+At a session boundary, if `update_policy` says dependency checks are enabled and due, run the bundled CLI's `check-updates` command first. If updates are available, tell the user and wait for explicit confirmation before running `ctxpm update` or `ctxpm update --all` with the bundled CLI. Use the CLI for the actual resource rewrite and reinstall step; do not hand-edit resource files when the CLI can perform the update.
+
+If the target update is the bundled `ctxpm` skill itself, use the same CLI path and reload the updated skill only at the next safe boundary.
+
 ## Compact `ctxpm.yaml` Reference
 
 The complete schema is defined in [`ctxpm-yaml.md`](ctxpm-yaml.md). `SKILL.md` should tell agents to read that sibling file before editing `ctxpm.yaml`.

@@ -32,7 +32,7 @@ packages: []
 | `version` | Yes | Format version. Use `1.0`. |
 | `project.name` | Yes | Project name. |
 | `agents` | Yes | Confirmed agent profiles used by the project. |
-| `update_policy` | No | Policy for dependency update checks. |
+| `update_policy` | No | Policy for conversational dependency update checks and confirmation-driven application. |
 | `dependencies` | Yes | External AI resources managed under `.ctxpm/dependencies/`. |
 | `packages` | Yes | Project-local AI resources managed under `.ctxpm/packages/`. |
 
@@ -217,6 +217,8 @@ Dependency versions must describe the resolved **resource root**, not just a sin
 | Git file or directory root | Full commit SHA of the latest commit that changed `source.path` |
 | Non-Git single-file root | `sha256:<hex>` |
 | Non-Git directory root | `sha256tree:<hex>` |
+
+During normal AI work, evaluate `update_policy` at a session boundary. If checks are enabled and due, the agent should call the bundled CLI to check for updates, then ask for confirmation before invoking `ctxpm update`.
 
 `sha256tree` is computed from the full directory tree:
 

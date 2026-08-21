@@ -194,7 +194,7 @@ ctxpm check-updates [--force] [--json]
 | `--force` | Ignore the configured check interval and query upstream now. |
 | `--json` | Emit JSON output. |
 
-Requires network access. Safe, read-only — does not modify any files. Run before `update`.
+Requires network access. Safe, read-only — does not modify any files. Run before `update`. In a conversational workflow, this is the discovery step before asking the user to confirm an update.
 
 ---
 
@@ -213,7 +213,7 @@ ctxpm update [<name>...] [--all] [--dry-run] [--json]
 | `--dry-run` | Resolve and report without changing files. |
 | `--json` | Emit JSON output. |
 
-Requires network access. Run `check-updates` first.
+Requires network access. Run `check-updates` first. In a conversational workflow, call this only after the user confirms the proposed update.
 
 ---
 
