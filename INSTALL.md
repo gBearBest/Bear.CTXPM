@@ -93,6 +93,7 @@ However, when the official companion `ctxpm` CLI is available, install or prepar
 - `ctxpm list`
 - `ctxpm check-updates`
 - `ctxpm update`
+- `ctxpm self-update`
 - `ctxpm remove`
 - `ctxpm validate`
 

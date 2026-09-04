@@ -88,6 +88,7 @@ When the companion CLI is available, prefer it for routine lifecycle operations:
 - `ctxpm validate`
 - `ctxpm check-updates`
 - `ctxpm update`
+- `ctxpm self-update`
 - `ctxpm remove`
 - `ctxpm memory search`
 - `ctxpm memory suggest`
@@ -99,6 +100,8 @@ For the full command reference — flags, options, and usage guidance for each c
 Run `ctxpm detect` on a shorter cadence than `ctxpm check-updates` so newly added AI resources in non-ctxpm locations are caught early, then migrate them and validate the result after user confirmation.
 
 If the CLI is unavailable, follow the same protocol manually instead of inventing a partial workflow.
+
+Use `ctxpm self-update` when the command-line tool itself needs to be upgraded. This is independent of `ctxpm update`, which updates AI resources declared in `ctxpm.yaml`. It supports both global installs and the project-local `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm` binary.
 
 ## Conversational Update Workflow
 
