@@ -31,7 +31,7 @@ dependencies:
       path: skills/git-commit
       ref: main
       entry: SKILL.md
-    version: a80885b76044550770f60f360f8a0e5ae3524a31
+    version: e24be77e6f203409cf99ab7d5a67e1540cb386d3
 packages:
   - name: ctxpm-release
     type: skill
