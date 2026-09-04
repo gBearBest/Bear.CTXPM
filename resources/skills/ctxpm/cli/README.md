@@ -8,7 +8,7 @@ The CLI binary lives alongside this file at `cli/ctxpm` relative to the skill ro
 
 - All mutating commands accept `--dry-run` to report planned changes without writing files.
 - All commands accept `--json` to emit structured output suitable for parsing.
-- Commands that fetch remote content require network access: `add`, `install`, `check-updates`, `update`.
+- Commands that fetch remote content require network access: `add`, `install`, `check-updates`, `update`, `self-update`.
 - Commands that only read local state are safe to run at any time: `list`, `validate`, `detect`, `memory search`.
 
 ---
@@ -232,6 +232,25 @@ ctxpm remove <name> [--delete-files | --keep-files] [--json]
 | `--json` | Emit JSON output. |
 
 `--delete-files` and `--keep-files` are mutually exclusive. When neither is specified, files are kept.
+
+---
+
+## self-update
+
+Update the currently running `ctxpm` CLI binary to a released version. This is separate from `ctxpm update`, which updates AI resources declared in `ctxpm.yaml`.
+
+```
+ctxpm self-update [--version <version>] [--force] [--dry-run] [--json]
+```
+
+| Flag | Description |
+|---|---|
+| `--version` | Target release tag, such as `v0.1.13`; defaults to the latest stable release. |
+| `--force` | Reinstall even when the current CLI already matches the target version. |
+| `--dry-run` | Resolve and report the update without replacing the executable. |
+| `--json` | Emit JSON output. |
+
+Requires network access and permission to replace the installed executable. It works for both global installs and the project-local `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm` install. The downloaded release archive is verified against the published SHA-256 checksums before installation.
 
 ---
 
