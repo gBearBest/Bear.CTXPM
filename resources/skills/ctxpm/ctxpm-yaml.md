@@ -218,7 +218,7 @@ Dependency versions must describe the resolved **resource root**, not just a sin
 | Non-Git single-file root | `sha256:<hex>` |
 | Non-Git directory root | `sha256tree:<hex>` |
 
-During normal AI work, evaluate `update_policy` at a session boundary. If checks are enabled and due, the agent should call the bundled CLI to check for updates, then ask for confirmation before invoking `ctxpm update`.
+During normal AI work, evaluate `update_policy` at a session boundary. If checks are enabled and due, the agent should call the bundled CLI to check for updates, then ask for confirmation only when an update is available and before invoking `ctxpm update`. A no-update result should remain silent in user-facing progress and final responses unless the user explicitly asks about `ctxpm` status.
 
 `sha256tree` is computed from the full directory tree:
 

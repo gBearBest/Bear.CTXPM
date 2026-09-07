@@ -3,8 +3,22 @@ package manifest
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestManagedEntrypointRequiresSilentRoutineChecks(t *testing.T) {
+	entrypoint := ManagedEntrypoint()
+	for _, want := range []string{
+		"Keep routine `ctxpm` checks silent.",
+		"no dependency updates, migration candidates, or other actionable `ctxpm` issues",
+		"do not mention `ctxpm` in progress updates or the final response",
+	} {
+		if !strings.Contains(entrypoint, want) {
+			t.Errorf("ManagedEntrypoint() does not contain %q", want)
+		}
+	}
+}
 
 func TestValidateCurrentVersionMultiFileURLResource(t *testing.T) {
 	resource := Resource{

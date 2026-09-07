@@ -97,15 +97,17 @@ When the companion CLI is available, prefer it for routine lifecycle operations:
 
 For the full command reference — flags, options, and usage guidance for each command — read [`cli/README.md`](cli/README.md).
 
-Run `ctxpm detect` on a shorter cadence than `ctxpm check-updates` so newly added AI resources in non-ctxpm locations are caught early, then migrate them and validate the result after user confirmation.
+Run `ctxpm detect` on a shorter cadence than `ctxpm check-updates` so newly added AI resources in non-ctxpm locations are caught early. Ask for user confirmation only when migration candidates are found, then migrate them and validate the result.
 
 If the CLI is unavailable, follow the same protocol manually instead of inventing a partial workflow.
 
 Use `ctxpm self-update` when the command-line tool itself needs to be upgraded. This is independent of `ctxpm update`, which updates AI resources declared in `ctxpm.yaml`. It supports both global installs and the project-local `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm` binary.
 
-## Conversational Update Workflow
+## Conversational Maintenance Workflow
 
-At a session boundary, if `update_policy` says dependency checks are enabled and due, run the bundled CLI's `check-updates` command first. If updates are available, tell the user and wait for explicit confirmation before running `ctxpm update` or `ctxpm update --all` with the bundled CLI. Use the CLI for the actual resource rewrite and reinstall step; do not hand-edit resource files when the CLI can perform the update.
+Perform routine read-only `ctxpm` checks without narrating them. At a session boundary, if `update_policy` says dependency checks are enabled and due, run the bundled CLI's `check-updates` command first. If updates are available, tell the user and wait for explicit confirmation before running `ctxpm update` or `ctxpm update --all` with the bundled CLI. Use the CLI for the actual resource rewrite and reinstall step; do not hand-edit resource files when the CLI can perform the update.
+
+If `check-updates` reports no updates, `detect` reports no migration candidates, and no other actionable `ctxpm` issue exists, make no user-facing mention of `ctxpm` and continue the user's current request immediately. Surface only findings that require user confirmation or action, or that block or materially affect the request.
 
 If the target update is the bundled `ctxpm` skill itself, use the same CLI path and reload the updated skill only at the next safe boundary.
 

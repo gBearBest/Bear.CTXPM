@@ -158,7 +158,7 @@ Scan the project for AI resource files (skills, rules, prompts, memories, MCP co
 ctxpm detect [--json]
 ```
 
-Safe, read-only. Run on a shorter cadence than `check-updates`. After reviewing the output, use `migrate` (with user confirmation) to bring detected resources under ctxpm management.
+Safe, read-only. Run on a shorter cadence than `check-updates`. After reviewing the output, use `migrate` (with user confirmation) to bring detected resources under ctxpm management. In a conversational workflow, do not narrate a no-candidate result; continue the user's current request.
 
 ---
 
@@ -194,7 +194,7 @@ ctxpm check-updates [--force] [--json]
 | `--force` | Ignore the configured check interval and query upstream now. |
 | `--json` | Emit JSON output. |
 
-Requires network access. Safe, read-only — does not modify any files. Run before `update`. In a conversational workflow, this is the discovery step before asking the user to confirm an update.
+Requires network access. Safe, read-only — does not modify any files. Run before `update`. In a conversational workflow, this is the discovery step before asking the user to confirm an available update. Do not mention a no-update result unless the user explicitly asks about `ctxpm` status.
 
 ---
 
