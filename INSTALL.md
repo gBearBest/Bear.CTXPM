@@ -85,7 +85,6 @@ However, when the official companion `ctxpm` CLI is available, install or prepar
 
 - `ctxpm init`
 - `ctxpm install`
-- `ctxpm entrypoint sync`
 - `ctxpm entrypoint doctor`
 - `ctxpm detect`
 - `ctxpm migrate`
@@ -93,7 +92,6 @@ However, when the official companion `ctxpm` CLI is available, install or prepar
 - `ctxpm list`
 - `ctxpm check-updates`
 - `ctxpm update`
-- `ctxpm self-update`
 - `ctxpm remove`
 - `ctxpm validate`
 
@@ -146,9 +144,9 @@ This means:
 
 If a user or AI later wants to introduce a new skill, rule, spec, prompt, memory, or MCP resource, first decide whether it is a `package` or a `dependency`, then place it under `.ctxpm/packages/` or `.ctxpm/dependencies/`.
 
-### 3.7 External Dependency Versions Use Source Hashes
+### 3.7 External Dependency Versions Use Stable Source Identities
 
-When installing or updating an external `dependency`, record a stable hash-based version in `ctxpm.yaml` whenever the source is known.
+When installing or updating an external `dependency`, record a stable source identity in `ctxpm.yaml` whenever the source is known. Ordinary resources use content or commit hashes; the registered `ctxpm` release unit uses its normalized GitHub Release tag because that tag binds the CLI, embedded skill snapshot, and entrypoint template together.
 
 - Versions describe the resolved **resource root**, not just a guessed single file.
 - If the resource is installed from Git, resolve the commit SHA of the most recent commit at or before the installed checkout that changed the resolved `source.path`, and record that full commit SHA as the dependency `version`.
@@ -158,10 +156,10 @@ When installing or updating an external `dependency`, record a stable hash-based
 - If the resource root is a non-Git directory, compute `version: sha256tree:<hex>` from the full directory tree.
 - The entry file is the file the AI agent should read first inside the resource root, such as `SKILL.md`, `MEMORY.md`, a rule file, a prompt file, a spec entry file, or an MCP configuration file.
 - If a multi-file URL resource is used, explicitly list all member files and record the root as `layout: dir`.
-- Do not use branch names, tags, `latest`, filenames, timestamps, or vague release labels as the version value for external AI resources.
+- Do not use branch names, tags, `latest`, filenames, timestamps, or vague release labels as the version value for ordinary external AI resources. The registered `ctxpm` release unit is the sole exception and uses a stable `vX.Y.Z` GitHub Release tag.
 - If the source hash cannot be confirmed, mark the version as unresolved in the installation report instead of inventing a value.
 
-This hash-based version is the baseline for future external resource update detection and update decisions.
+This recorded identity is the baseline for future external resource update detection and update decisions.
 
 ---
 
@@ -542,29 +540,31 @@ Canonical file rules:
 4. If an old root entrypoint file such as `AGENTS.md` or `CLAUDE.md` exists as a real file and `.ctxpm/AGENTS.md` does not yet exist, migrate that file into `.ctxpm/AGENTS.md` before creating the alias symlink.
 5. After `.ctxpm/AGENTS.md` is canonicalized, create root-level symlinks for declared entrypoint filenames such as `AGENTS.md -> .ctxpm/AGENTS.md`, `CLAUDE.md -> .ctxpm/AGENTS.md`, and `ANTIGRAVITY.md -> .ctxpm/AGENTS.md`.
 6. If an alias path already exists as a real file with different non-managed content, stop and report the conflict instead of overwriting it silently.
-7. If multiple real root entrypoint files already exist at the same time, do not silently pick one. Report that AI should first merge any unique instructions from those files into `.ctxpm/AGENTS.md`, then rerun `ctxpm entrypoint sync` to convert the remaining filenames into alias symlinks.
+7. If multiple real root entrypoint files already exist at the same time, do not silently pick one. Report that AI should first merge any unique instructions from those files into `.ctxpm/AGENTS.md`, then rerun `ctxpm install` to convert the remaining filenames into alias symlinks.
 
 ### 5.9 Install the Bundled External `ctxpm` Dependency
 
 Install an external helper skill dependency so future AI agents still have an explicit in-project workflow for creating, reading, updating, deleting, or reorganizing AI resources after the initial installation, even when the companion CLI is unavailable.
 
+The registered `ctxpm` dependency represents the complete ctxpm release unit and records a normalized GitHub Release tag such as `v0.1.14` as its version. `ctxpm update ctxpm` and `ctxpm update --all` upgrade the CLI, complete bundled skill directory, and managed entrypoint template together from the latest stable GitHub Release. `ctxpm install` does not look for a newer release: it installs the Release already locked in `ctxpm.yaml`, including its project-local CLI and embedded resources, without replacing a separate global CLI.
+
 Follow the dedicated [`ctxpm` skill specification](resources/skills/ctxpm/SKILL.md).
 
 At minimum, this step must:
 
-1. Create or update `.ctxpm/dependencies/skills/ctxpm/SKILL.md`.
-2. Copy or write the complete `ctxpm.yaml` format document into the skill directory as `.ctxpm/dependencies/skills/ctxpm/ctxpm-yaml.md`, using the Bear.CTXPM `resources/skills/ctxpm/ctxpm-yaml.md` source specification when it is available.
+1. Restore every file shipped under `resources/skills/ctxpm/` from the locked Release binary into `.ctxpm/dependencies/skills/ctxpm/`.
+2. Ensure that snapshot includes `SKILL.md`, `ctxpm-yaml.md`, and `cli/README.md`.
 3. Create or update the companion CLI directory at `.ctxpm/dependencies/skills/ctxpm/cli/`.
 4. Install or place the project-local companion CLI at `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm`.
-   - If a global `ctxpm` is already available, it may be copied from that global installation.
-   - Prefer the official remote installer in project mode: `curl -fsSL https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/latest/cli/install.sh | sh -s -- --scope project`
-   - Treat this as the default initialization path: latest release, project scope, current directory as project root.
+   - If the active `ctxpm` exactly matches the manifest's locked Release, it may be copied from that installation.
+   - Otherwise download and verify the archive for the exact locked Release, then use that binary's embedded resources for project installation.
+   - For first-time initialization without an existing lock, prefer the official remote installer in project mode: `curl -fsSL https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/latest/cli/install.sh | sh -s -- --scope project`.
    - If the current repository already contains a trusted local installer, `sh cli/install.sh --scope project` is an acceptable fallback so the canonical project-local launcher is created in place.
    - On Windows-like shell environments, the project-local directory may also include sibling helper launchers such as `ctxpm.exe` and `ctxpm.cmd`, but `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm` remains the canonical launcher path for the protocol-managed installation.
 5. Immediately create compatibility symlinks in every confirmed agent's default skill discovery directories, such as `.agents/skills/ctxpm`, so each agent can discover the skill from its normal skill or slash-command UI.
 6. Record `ctxpm` in `ctxpm.yaml` as an external `dependency` of type `skill`.
 7. Record the full skill directory as a directory resource root, with `layout: dir`, `path: .ctxpm/dependencies/skills/ctxpm`, and `entry: SKILL.md`.
-8. When the bundled source is described explicitly, prefer `source.type: git` with `source.path: resources/skills/ctxpm` and `source.entry: SKILL.md`.
+8. When the bundled source is described explicitly, prefer `source.type: git`, `source.ref: latest`, `source.path: resources/skills/ctxpm`, and `source.entry: SKILL.md`; installation is still resolved from the locked Release binary rather than directly from this moving ref.
 9. Do not add a `compatibility` field — paths are derived automatically from the declared `agents`.
 10. Ensure the generated `SKILL.md` contains a compact `ctxpm.yaml` format reference and points to the sibling `ctxpm-yaml.md` companion document.
 
