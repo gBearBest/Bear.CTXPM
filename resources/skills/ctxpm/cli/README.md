@@ -8,7 +8,7 @@ The CLI binary lives alongside this file at `cli/ctxpm` relative to the skill ro
 
 - All mutating commands accept `--dry-run` to report planned changes without writing files.
 - All commands accept `--json` to emit structured output suitable for parsing.
-- Commands that fetch remote content require network access: `add`, `install`, `check-updates`, `update`, `self-update`.
+- Commands that fetch remote content require network access: `add`, ordinary dependency installation, `check-updates`, and `update`.
 - Commands that only read local state are safe to run at any time: `list`, `validate`, `detect`, `memory search`.
 
 ---
@@ -107,7 +107,7 @@ Safe, read-only. Run after manual edits to `ctxpm.yaml` or after filesystem chan
 
 ## install
 
-Download and install all dependencies declared in `ctxpm.yaml`, then repair compatibility symlinks. Idempotent — safe to re-run.
+Download and install all dependencies declared in `ctxpm.yaml`, then repair compatibility symlinks. For the registered `ctxpm` dependency, install the exact Release tag recorded in the manifest and restore its CLI, complete embedded skill snapshot, and entrypoint template. Idempotent — safe to re-run.
 
 ```
 ctxpm install [--type <type>] [--only <name>] [--dry-run] [--json]
@@ -120,23 +120,13 @@ ctxpm install [--type <type>] [--only <name>] [--dry-run] [--json]
 | `--dry-run` | Report the work without writing files. |
 | `--json` | Emit JSON output. |
 
-Requires network access for git and URL sources.
+Requires network access for git and URL sources and when the locked ctxpm Release differs from the active CLI. Installing a project-locked ctxpm Release updates the project-local CLI without replacing a separate global CLI.
 
 ---
 
 ## entrypoint
 
-Manage the shared root entrypoint topology: `.ctxpm/AGENTS.md` as the single source of truth, with root-level entrypoint filenames (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, etc.) as symlinks.
-
-### entrypoint sync
-
-Apply the canonical entrypoint topology for all declared agents.
-
-```
-ctxpm entrypoint sync [--json]
-```
-
-Run after adding or removing agents from `ctxpm.yaml`, or to repair broken symlinks.
+Diagnose the shared root entrypoint topology: `.ctxpm/AGENTS.md` as the single source of truth, with root-level entrypoint filenames (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, etc.) as symlinks. Run `ctxpm install` to create or repair this topology and refresh the managed block from the locked ctxpm Release's bundled template.
 
 ### entrypoint doctor
 
@@ -146,7 +136,7 @@ Check whether the entrypoint topology is healthy without modifying anything.
 ctxpm entrypoint doctor [--json]
 ```
 
-Safe, read-only. Run to diagnose drift before deciding to sync.
+Safe, read-only. Run to diagnose drift before running `ctxpm install`.
 
 ---
 
@@ -183,7 +173,7 @@ Always run `detect` first and confirm the candidate list with the user before ru
 
 ## check-updates
 
-Check whether any installed dependencies have upstream updates available.
+Check whether dependencies have upstream updates. The single `ctxpm` result represents its complete release unit and includes component status for the CLI, bundled skill, and managed entrypoint.
 
 ```
 ctxpm check-updates [--force] [--json]
@@ -200,7 +190,7 @@ Requires network access. Safe, read-only — does not modify any files. Run befo
 
 ## update
 
-Apply upstream updates for one or more dependencies, rewrite their versions in `ctxpm.yaml`, and reinstall.
+Apply upstream updates for dependencies. Updating the special `ctxpm` dependency upgrades the CLI, bundled skill, and managed entrypoint template together.
 
 ```
 ctxpm update [<name>...] [--all] [--dry-run] [--json]
@@ -213,7 +203,7 @@ ctxpm update [<name>...] [--all] [--dry-run] [--json]
 | `--dry-run` | Resolve and report without changing files. |
 | `--json` | Emit JSON output. |
 
-Requires network access. Run `check-updates` first. In a conversational workflow, call this only after the user confirms the proposed update.
+Requires network access. Run `check-updates` first. In a conversational workflow, call this only after the user confirms the proposed update. Use `ctxpm update ctxpm` to upgrade the complete ctxpm release unit explicitly; `ctxpm update --all` includes it when an update is available.
 
 ---
 
@@ -232,25 +222,6 @@ ctxpm remove <name> [--delete-files | --keep-files] [--json]
 | `--json` | Emit JSON output. |
 
 `--delete-files` and `--keep-files` are mutually exclusive. When neither is specified, files are kept.
-
----
-
-## self-update
-
-Update the currently running `ctxpm` CLI binary to a released version. This is separate from `ctxpm update`, which updates AI resources declared in `ctxpm.yaml`.
-
-```
-ctxpm self-update [--version <version>] [--force] [--dry-run] [--json]
-```
-
-| Flag | Description |
-|---|---|
-| `--version` | Target release tag, such as `v0.1.13`; defaults to the latest stable release. |
-| `--force` | Reinstall even when the current CLI already matches the target version. |
-| `--dry-run` | Resolve and report the update without replacing the executable. |
-| `--json` | Emit JSON output. |
-
-Requires network access and permission to replace the installed executable. It works for both global installs and the project-local `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm` install. The downloaded release archive is verified against the published SHA-256 checksums before installation.
 
 ---
 

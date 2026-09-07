@@ -96,8 +96,6 @@ func run(args []string) error {
 		return runUpdate(app, args[1:])
 	case "remove":
 		return runRemove(app, args[1:])
-	case "self-update":
-		return runSelfUpdate(app, args[1:])
 	case "memory":
 		return runMemory(app, args[1:])
 	default:
@@ -117,10 +115,11 @@ func runInit(app *engine.App, args []string) error {
 	}
 
 	result, err := app.Init(engine.InitOptions{
-		Agent:       *agent,
-		ProjectName: *projectName,
-		Force:       *force,
-		DryRun:      *dryRun,
+		Agent:          *agent,
+		ProjectName:    *projectName,
+		CurrentVersion: cliVersion(),
+		Force:          *force,
+		DryRun:         *dryRun,
 	})
 	if err != nil {
 		return err
@@ -231,9 +230,11 @@ func runInstall(app *engine.App, args []string) error {
 	}
 
 	result, err := app.Install(context.Background(), engine.InstallOptions{
-		Type:   *resourceType,
-		Only:   *only,
-		DryRun: *dryRun,
+		Type:                *resourceType,
+		Only:                *only,
+		DryRun:              *dryRun,
+		CurrentVersion:      cliVersion(),
+		BundledCtxpmRelease: os.Getenv(engine.CtxpmReleaseSyncEnv) == "1",
 	})
 	if err != nil {
 		return err
@@ -243,21 +244,9 @@ func runInstall(app *engine.App, args []string) error {
 
 func runEntrypoint(app *engine.App, args []string) error {
 	if len(args) == 0 {
-		return failf(2, "usage: ctxpm entrypoint <sync|doctor> [options]")
+		return failf(2, "usage: ctxpm entrypoint doctor [options]")
 	}
 	switch args[0] {
-	case "sync":
-		fs := flag.NewFlagSet("entrypoint sync", flag.ContinueOnError)
-		fs.SetOutput(os.Stderr)
-		jsonOutput := fs.Bool("json", false, "Emit JSON output")
-		if err := fs.Parse(args[1:]); err != nil {
-			return err
-		}
-		result, err := app.EntrypointSync()
-		if err != nil {
-			return err
-		}
-		return printMaybeJSON(result, *jsonOutput)
 	case "doctor":
 		fs := flag.NewFlagSet("entrypoint doctor", flag.ContinueOnError)
 		fs.SetOutput(os.Stderr)
@@ -326,7 +315,8 @@ func runCheckUpdates(app *engine.App, args []string) error {
 	}
 
 	result, err := app.CheckUpdates(context.Background(), engine.CheckUpdatesOptions{
-		Force: *force,
+		Force:          *force,
+		CurrentVersion: cliVersion(),
 	})
 	if err != nil {
 		return err
@@ -346,9 +336,10 @@ func runUpdate(app *engine.App, args []string) error {
 	}
 
 	result, err := app.Update(context.Background(), engine.UpdateOptions{
-		Names:  fs.Args(),
-		All:    *all,
-		DryRun: *dryRun,
+		Names:          fs.Args(),
+		All:            *all,
+		CurrentVersion: cliVersion(),
+		DryRun:         *dryRun,
 	})
 	if err != nil {
 		return err
@@ -491,29 +482,6 @@ func runMemoryPrune(app *engine.App, args []string) error {
 	return printMaybeJSON(result, *jsonOutput)
 }
 
-func runSelfUpdate(app *engine.App, args []string) error {
-	fs := flag.NewFlagSet("self-update", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	version := fs.String("version", "latest", "Target version to install (default: latest)")
-	dryRun := fs.Bool("dry-run", false, "Report what would be done without making changes")
-	force := fs.Bool("force", false, "Force reinstall even if already at the target version")
-	jsonOutput := fs.Bool("json", false, "Emit JSON output")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	result, err := app.SelfUpdate(context.Background(), engine.SelfUpdateOptions{
-		Version:        *version,
-		CurrentVersion: cliVersion(),
-		DryRun:         *dryRun,
-		Force:          *force,
-	})
-	if err != nil {
-		return err
-	}
-	return printMaybeJSON(result, *jsonOutput)
-}
-
 func printMaybeJSON(value any, jsonOutput bool) error {
 	if jsonOutput {
 		encoder := json.NewEncoder(os.Stdout)
@@ -543,27 +511,27 @@ func printHelp(w *os.File) {
 		"  version        Print CLI version information",
 		"  init           Initialize the current project as a Bear.CTXPM project",
 		"  add            Add and install an external AI resource from a URL",
-		"  entrypoint     Sync or diagnose shared root entrypoint files",
+		"  entrypoint     Diagnose shared root entrypoint files",
 		"  detect         Detect unmanaged AI resources that may need migration",
 		"  migrate        Migrate detected AI resources into ctxpm-managed roots",
 		"  install        Install dependencies and repair compatibility links",
 		"  list           List dependencies and packages",
 		"  memory         Search, suggest, capture, or prune project memories",
 		"  validate       Validate ctxpm.yaml and local paths",
-		"  check-updates  Check whether dependencies have upstream updates",
-		"  update         Apply dependency updates, rewrite manifest versions, and install resources",
+		"  check-updates  Check dependency updates, including the ctxpm release unit",
+		"  update         Update dependencies, including the ctxpm release unit",
 		"  remove         Remove a dependency or package",
-		"  self-update    Update the ctxpm CLI to the latest released version",
 		"",
 		"Examples:",
 		"  ctxpm --version",
 		"  ctxpm init --agent codex",
 		"  ctxpm add https://github.com/example/ai/tree/main/skills/reviewer --type skill",
 		"  ctxpm add https://gitlab.company.com/team/ai-resources.git --type rule --source-path rules/security",
-		"  ctxpm entrypoint sync",
+		"  ctxpm entrypoint doctor",
 		"  ctxpm memory search --query billing",
 		"  ctxpm install",
 		"  ctxpm update --all",
+		"  ctxpm update ctxpm",
 	}
 	fmt.Fprintln(w, strings.Join(lines, "\n"))
 }

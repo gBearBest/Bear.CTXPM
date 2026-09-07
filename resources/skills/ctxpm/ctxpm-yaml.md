@@ -36,6 +36,8 @@ packages: []
 | `dependencies` | Yes | External AI resources managed under `.ctxpm/dependencies/`. |
 | `packages` | Yes | Project-local AI resources managed under `.ctxpm/packages/`. |
 
+`update_policy.include_self` controls whether routine `check-updates` results include the registered `ctxpm` release unit. That single dependency result covers the CLI, bundled skill, and managed entrypoint; update it with `ctxpm update ctxpm` or `ctxpm update --all`.
+
 ## Core Concepts
 
 ### Resource Root
@@ -214,11 +216,12 @@ Dependency versions must describe the resolved **resource root**, not just a sin
 
 | Source shape | Version format |
 | --- | --- |
+| Registered `ctxpm` release unit | Normalized GitHub Release tag, such as `v0.1.14` |
 | Git file or directory root | Full commit SHA of the latest commit that changed `source.path` |
 | Non-Git single-file root | `sha256:<hex>` |
 | Non-Git directory root | `sha256tree:<hex>` |
 
-During normal AI work, evaluate `update_policy` at a session boundary. If checks are enabled and due, the agent should call the bundled CLI to check for updates, then ask for confirmation only when an update is available and before invoking `ctxpm update`. A no-update result should remain silent in user-facing progress and final responses unless the user explicitly asks about `ctxpm` status.
+During normal AI work, evaluate `update_policy` at a session boundary. If checks are enabled and due, the agent should call the bundled CLI to check for updates, then ask for confirmation only when an update is available and before invoking `ctxpm update`. A no-update result should remain silent in user-facing progress and final responses unless the user explicitly asks about `ctxpm` status. Updating the registered `ctxpm` dependency by name or through `--all` upgrades its complete release unit.
 
 `sha256tree` is computed from the full directory tree:
 
@@ -228,7 +231,9 @@ During normal AI work, evaluate `update_policy` at a session boundary. If checks
 4. Hash each file content with SHA-256.
 5. Hash the resulting path-and-hash manifest.
 
-Do not use branch names, tags, timestamps, filenames, or vague labels as dependency versions.
+Do not use branch names, tags, timestamps, filenames, or vague labels as ordinary dependency versions. The registered `ctxpm` release unit is the explicit exception: its version is a stable GitHub Release tag.
+
+The registered `ctxpm` dependency keeps the normalized Release tag installed for the project in its normal `version` field. Its update availability is determined by the latest stable GitHub Release because the CLI, complete bundled skill directory, and entrypoint template must advance together. `ctxpm install` installs exactly the recorded Release instead of discovering a newer one; legacy commit-SHA registrations remain installable until `ctxpm update ctxpm` migrates them to Release-version semantics.
 
 ## Packages
 

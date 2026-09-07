@@ -44,10 +44,11 @@ type textResult interface {
 }
 
 type InitOptions struct {
-	Agent       string
-	ProjectName string
-	Force       bool
-	DryRun      bool
+	Agent          string
+	ProjectName    string
+	CurrentVersion string
+	Force          bool
+	DryRun         bool
 }
 
 type InitResult struct {
@@ -227,7 +228,8 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 		gitStaged = stageEntrypointMigration(a.Root)
 	}
 
-	ctxpmResource := bundledCtxpmResource(m.Agents)
+	currentCtxpmVersion := currentCtxpmManifestVersion(opts.CurrentVersion)
+	ctxpmResource := bundledCtxpmResource(m.Agents, currentCtxpmVersion)
 	upsertManagedDependency(&m.Dependencies, ctxpmResource)
 
 	gitignorePath := filepath.Join(a.Root, ".gitignore")
@@ -237,7 +239,7 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 	ctxpmYAMLStatus := "planned"
 	localCLIStatus := ""
 	if !opts.DryRun {
-		bundled, err := ensureBundledCtxpm(a.Root, m.Agents)
+		bundled, err := ensureBundledCtxpm(a.Root, m.Agents, currentCtxpmVersion)
 		if err != nil {
 			return nil, err
 		}
@@ -507,9 +509,12 @@ func (a *App) Validate() (*ValidateResult, error) {
 }
 
 type InstallOptions struct {
-	Type   string
-	Only   string
-	DryRun bool
+	Type                string
+	Only                string
+	DryRun              bool
+	CurrentVersion      string
+	BundledCtxpmRelease bool
+	SkipCtxpmRelease    bool
 }
 
 type InstallAction struct {
@@ -571,8 +576,13 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 	actions := []InstallAction{}
 	versionUpdates := map[string]string{}
 	installedResources := []manifest.Resource{}
+	currentCtxpmVersion := currentCtxpmManifestVersion(opts.CurrentVersion)
+	ctxpmReleaseTarget := ""
 	for i := range m.Dependencies {
 		dep := &m.Dependencies[i]
+		if dep.Name == "ctxpm" && opts.SkipCtxpmRelease {
+			continue
+		}
 		if opts.Type != "" && dep.Type != opts.Type {
 			continue
 		}
@@ -581,10 +591,45 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 		}
 		if opts.DryRun {
 			status := "would_install"
-			if dep.Source == nil {
+			kind := "dependency"
+			if dep.Name == "ctxpm" && opts.BundledCtxpmRelease {
+				status = "would_install_bundled"
+				kind = "release"
+			} else if dep.Name == "ctxpm" && isCtxpmReleaseVersion(dep.Version) {
+				status = "would_install_release"
+				kind = "release"
+			} else if dep.Source == nil {
 				status = "would_link"
 			}
-			actions = append(actions, InstallAction{Kind: "dependency", Name: dep.Name, Status: status, Version: dep.Version})
+			actions = append(actions, InstallAction{Kind: kind, Name: dep.Name, Status: status, Version: dep.Version})
+			continue
+		}
+		if dep.Name == "ctxpm" && opts.BundledCtxpmRelease {
+			previousVersion := dep.Version
+			bundleVersion := dep.Version
+			if isCtxpmReleaseVersion(currentCtxpmVersion) {
+				bundleVersion = currentCtxpmVersion
+			}
+			bundled, err := ensureBundledCtxpm(a.Root, m.Agents, bundleVersion)
+			if err != nil {
+				return nil, err
+			}
+			if bundled.Resource.Version != "" {
+				dep.Version = bundled.Resource.Version
+			}
+			if previousVersion != dep.Version {
+				versionUpdates[dep.Name] = dep.Version
+			}
+			actions = append(actions, InstallAction{Kind: "release", Name: dep.Name, Status: "installed_bundled", Version: dep.Version})
+			if bundled.LocalCLIStatus != "" {
+				actions = append(actions, InstallAction{Kind: "tool", Name: "ctxpm local cli", Status: bundled.LocalCLIStatus})
+			}
+			installedResources = append(installedResources, *dep)
+			continue
+		}
+		if dep.Name == "ctxpm" && isCtxpmReleaseVersion(dep.Version) {
+			ctxpmReleaseTarget = canonicalCtxpmReleaseVersion(dep.Version)
+			installedResources = append(installedResources, *dep)
 			continue
 		}
 		if dep.Source == nil {
@@ -599,9 +644,7 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 			if dep.Name == "ctxpm" {
 				cliPath := filepath.Join(a.Root, ".ctxpm/dependencies/skills/ctxpm/cli/ctxpm")
 				status, _ := prepareBundledCLI(ctx, cliPath, a.Root)
-				if status != "verified-existing" {
-					actions = append(actions, InstallAction{Kind: "tool", Name: "ctxpm local cli", Status: status})
-				}
+				actions = append(actions, InstallAction{Kind: "tool", Name: "ctxpm local cli", Status: status})
 			}
 			continue
 		}
@@ -619,9 +662,7 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 		if dep.Name == "ctxpm" {
 			cliPath := filepath.Join(a.Root, ".ctxpm/dependencies/skills/ctxpm/cli/ctxpm")
 			status, _ := prepareBundledCLI(ctx, cliPath, a.Root)
-			if status != "verified-existing" {
-				actions = append(actions, InstallAction{Kind: "tool", Name: "ctxpm local cli", Status: status})
-			}
+			actions = append(actions, InstallAction{Kind: "tool", Name: "ctxpm local cli", Status: status})
 		}
 	}
 	for i := range m.Packages {
@@ -654,8 +695,8 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 			return nil, err
 		}
 	}
-	if !opts.DryRun {
-		if _, err := syncManagedEntrypoints(a.Root, m, false); err != nil {
+	if !opts.DryRun && shouldSyncEntrypointFromActiveCLI(m, currentCtxpmVersion, opts.BundledCtxpmRelease, ctxpmReleaseTarget) {
+		if _, err := syncManagedEntrypoints(a.Root, m, true); err != nil {
 			return nil, err
 		}
 	}
@@ -669,23 +710,53 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 			return nil, err
 		}
 	}
+	if !opts.DryRun && ctxpmReleaseTarget != "" {
+		releaseResult, err := runCtxpmReleaseInstall(a, ctx, CtxpmReleaseUpdateOptions{
+			Version:        ctxpmReleaseTarget,
+			CurrentVersion: currentCtxpmVersion,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to install ctxpm release %s: %w", ctxpmReleaseTarget, err)
+		}
+		status := "installed_release"
+		if releaseResult.Status == "up_to_date" {
+			status = "installed_bundled"
+		}
+		actions = append(actions, InstallAction{Kind: "release", Name: "ctxpm", Status: status, Version: ctxpmReleaseTarget})
+	}
 	return &InstallResult{Status: ternary(opts.DryRun, "dry_run", "applied"), Actions: actions}, nil
 }
 
+func shouldSyncEntrypointFromActiveCLI(m *manifest.Manifest, currentVersion string, bundledRelease bool, pendingRelease string) bool {
+	if bundledRelease {
+		return true
+	}
+	if pendingRelease != "" {
+		return false
+	}
+	ctxpm, ok := findDependency(m.Dependencies, "ctxpm")
+	if !ok || !isCtxpmReleaseVersion(ctxpm.Version) {
+		return true
+	}
+	return canonicalCtxpmReleaseVersion(ctxpm.Version) == canonicalCtxpmReleaseVersion(currentVersion)
+}
+
 type CheckUpdatesOptions struct {
-	Force bool
+	Force          bool
+	CurrentVersion string
 }
 
 type DependencyUpdate struct {
-	Name           string   `json:"name"`
-	Type           string   `json:"type"`
-	Path           string   `json:"path"`
-	SourceType     string   `json:"source_type"`
-	CurrentVersion string   `json:"current_version,omitempty"`
-	LatestVersion  string   `json:"latest_version,omitempty"`
-	Status         string   `json:"status"`
-	Reason         string   `json:"reason,omitempty"`
-	Compatibility  []string `json:"compatibility,omitempty"`
+	Name           string                       `json:"name"`
+	Type           string                       `json:"type"`
+	Path           string                       `json:"path"`
+	SourceType     string                       `json:"source_type"`
+	CurrentVersion string                       `json:"current_version,omitempty"`
+	LatestVersion  string                       `json:"latest_version,omitempty"`
+	Status         string                       `json:"status"`
+	Reason         string                       `json:"reason,omitempty"`
+	Compatibility  []string                     `json:"compatibility,omitempty"`
+	Components     []CtxpmReleaseComponentCheck `json:"components,omitempty"`
 }
 
 type CheckUpdatesResult struct {
@@ -717,6 +788,9 @@ func (r CheckUpdatesResult) Text() string {
 			line += " reason=" + dep.Reason
 		}
 		lines = append(lines, line)
+		for _, component := range dep.Components {
+			lines = append(lines, fmt.Sprintf("  - %s [%s]", component.Name, component.Status))
+		}
 	}
 	return strings.Join(lines, "\n") + "\n"
 }
@@ -751,13 +825,19 @@ func (a *App) CheckUpdates(ctx context.Context, opts CheckUpdatesOptions) (*Chec
 	if !opts.Force {
 		if cached, ok := maybeReuseCheckState(statePath, now, policy.Interval); ok {
 			cached.Policy = policy
-			return cached, nil
+			ok = a.refreshCachedCtxpmCheck(cached, m, opts.CurrentVersion, boolValue(policy.IncludeSelf, true))
+			if ok {
+				return cached, nil
+			}
 		}
 	}
 
 	results := []DependencyUpdate{}
 	for _, dep := range m.Dependencies {
-		if dep.Name == "ctxpm" && !boolValue(policy.IncludeSelf, true) {
+		if dep.Name == "ctxpm" {
+			if boolValue(policy.IncludeSelf, true) {
+				results = append(results, a.checkCtxpmDependency(ctx, dep, m.Agents, opts.CurrentVersion))
+			}
 			continue
 		}
 		version, err := a.resolveLatestVersion(ctx, dep)
@@ -801,13 +881,79 @@ func (a *App) CheckUpdates(ctx context.Context, opts CheckUpdatesOptions) (*Chec
 	return result, nil
 }
 
+func (a *App) checkCtxpmDependency(ctx context.Context, dep manifest.Resource, agents []string, currentVersion string) DependencyUpdate {
+	check := a.CheckCtxpmRelease(ctx, currentVersion)
+	return ctxpmReleaseDependencyUpdate(dep, agents, check)
+}
+
+func ctxpmReleaseDependencyUpdate(dep manifest.Resource, agents []string, check *CtxpmReleaseCheck) DependencyUpdate {
+	installedVersion := strings.TrimSpace(dep.Version)
+	if isCtxpmReleaseVersion(installedVersion) {
+		installedVersion = canonicalCtxpmReleaseVersion(installedVersion)
+	}
+	return DependencyUpdate{
+		Name:           dep.Name,
+		Type:           dep.Type,
+		Path:           dep.Path,
+		SourceType:     "release",
+		CurrentVersion: installedVersion,
+		LatestVersion:  check.LatestVersion,
+		Status:         check.Status,
+		Reason:         check.Reason,
+		Compatibility:  manifest.DerivedCompatibilityPaths(agents, dep),
+		Components:     append([]CtxpmReleaseComponentCheck(nil), check.Components...),
+	}
+}
+
+func (a *App) refreshCachedCtxpmCheck(result *CheckUpdatesResult, m *manifest.Manifest, currentVersion string, include bool) bool {
+	index := -1
+	for i := range result.Dependencies {
+		if result.Dependencies[i].Name == "ctxpm" {
+			index = i
+			break
+		}
+	}
+	var dep *manifest.Resource
+	for i := range m.Dependencies {
+		if m.Dependencies[i].Name == "ctxpm" {
+			dep = &m.Dependencies[i]
+			break
+		}
+	}
+	if !include || dep == nil {
+		if index >= 0 {
+			result.Dependencies = append(result.Dependencies[:index], result.Dependencies[index+1:]...)
+		}
+		return true
+	}
+	if index < 0 {
+		return false
+	}
+	local := a.checkCtxpmReleaseLocal(currentVersion)
+	cached := result.Dependencies[index]
+	applyCtxpmReleaseCheck(local, cached.LatestVersion, errorFromReason(cached.Reason))
+	updated := ctxpmReleaseDependencyUpdate(*dep, m.Agents, local)
+	result.Dependencies[index] = updated
+	return true
+}
+
+func errorFromReason(reason string) error {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return nil
+	}
+	return errors.New(reason)
+}
+
 type UpdateOptions struct {
-	Names  []string
-	All    bool
-	DryRun bool
+	Names          []string
+	All            bool
+	CurrentVersion string
+	DryRun         bool
 }
 
 type UpdateAction struct {
+	Kind           string `json:"kind,omitempty"`
 	Name           string `json:"name"`
 	Status         string `json:"status"`
 	CurrentVersion string `json:"current_version,omitempty"`
@@ -845,13 +991,18 @@ func (a *App) Update(ctx context.Context, opts UpdateOptions) (*UpdateResult, er
 		return nil, err
 	}
 	normalizeSharedEntrypoints(m)
-	check, err := a.CheckUpdates(ctx, CheckUpdatesOptions{Force: true})
+	check, err := a.CheckUpdates(ctx, CheckUpdatesOptions{Force: true, CurrentVersion: opts.CurrentVersion})
 	if err != nil {
 		return nil, err
 	}
 	byName := map[string]DependencyUpdate{}
 	for _, item := range check.Dependencies {
 		byName[item.Name] = item
+	}
+	if containsString(opts.Names, "ctxpm") {
+		if dep, ok := findDependency(m.Dependencies, "ctxpm"); ok {
+			byName["ctxpm"] = a.checkCtxpmDependency(ctx, dep, m.Agents, opts.CurrentVersion)
+		}
 	}
 
 	targets := map[string]bool{}
@@ -872,6 +1023,7 @@ func (a *App) Update(ctx context.Context, opts UpdateOptions) (*UpdateResult, er
 
 	result := &UpdateResult{Status: ternary(opts.DryRun, "dry_run", "applied")}
 	versionUpdates := map[string]string{}
+	ctxpmSelected := targets["ctxpm"]
 	for i := range m.Dependencies {
 		dep := &m.Dependencies[i]
 		if !targets[dep.Name] {
@@ -880,6 +1032,9 @@ func (a *App) Update(ctx context.Context, opts UpdateOptions) (*UpdateResult, er
 		updateInfo, ok := byName[dep.Name]
 		if !ok {
 			return nil, fmt.Errorf("dependency %q was not found", dep.Name)
+		}
+		if dep.Name == "ctxpm" {
+			continue
 		}
 		switch updateInfo.Status {
 		case "up_to_date":
@@ -913,11 +1068,6 @@ func (a *App) Update(ctx context.Context, opts UpdateOptions) (*UpdateResult, er
 			result.Skipped = append(result.Skipped, UpdateAction{Name: dep.Name, Status: updateInfo.Status, Reason: updateInfo.Reason})
 		}
 	}
-	if !opts.DryRun {
-		if _, err := syncManagedEntrypoints(a.Root, m, false); err != nil {
-			return nil, err
-		}
-	}
 	if !opts.DryRun && len(versionUpdates) > 0 {
 		if _, err := manifest.Save(a.Root, m); err != nil {
 			return nil, err
@@ -929,8 +1079,30 @@ func (a *App) Update(ctx context.Context, opts UpdateOptions) (*UpdateResult, er
 		}
 	}
 	if !opts.DryRun {
-		if _, err := a.Install(ctx, InstallOptions{}); err != nil {
+		if _, err := a.Install(ctx, InstallOptions{CurrentVersion: opts.CurrentVersion, SkipCtxpmRelease: ctxpmSelected}); err != nil {
 			return nil, err
+		}
+	}
+	if ctxpmSelected {
+		updateInfo, ok := byName["ctxpm"]
+		if !ok {
+			return nil, errors.New("dependency \"ctxpm\" was not found")
+		}
+		switch updateInfo.Status {
+		case "up_to_date":
+			result.Skipped = append(result.Skipped, UpdateAction{Name: "ctxpm", Status: "up_to_date"})
+		case "update_available":
+			if opts.DryRun {
+				result.Applied = append(result.Applied, UpdateAction{Name: "ctxpm", Kind: "release", Status: "would_update", CurrentVersion: updateInfo.CurrentVersion, LatestVersion: updateInfo.LatestVersion})
+				break
+			}
+			ctxpmResult, err := runCtxpmReleaseUpdate(a, ctx, CtxpmReleaseUpdateOptions{Version: updateInfo.LatestVersion, CurrentVersion: opts.CurrentVersion, Force: true})
+			if err != nil {
+				return nil, err
+			}
+			result.Applied = append(result.Applied, UpdateAction{Name: "ctxpm", Kind: "release", Status: ctxpmResult.Status, CurrentVersion: ctxpmResult.CurrentVersion, LatestVersion: ctxpmResult.LatestVersion})
+		default:
+			result.Skipped = append(result.Skipped, UpdateAction{Name: "ctxpm", Status: updateInfo.Status, Reason: updateInfo.Reason})
 		}
 	}
 	return result, nil
@@ -1317,9 +1489,41 @@ func (a *App) installResource(ctx context.Context, agents []string, resource *ma
 		return nil, err
 	}
 	defer resolved.Close()
+	var activeCLISnapshot string
+	var activeCLIMode os.FileMode
+	if resource.Name == "ctxpm" {
+		activeCLI, err := currentExecutablePath()
+		if err != nil {
+			return nil, fmt.Errorf("cannot preserve the active ctxpm CLI: %w", err)
+		}
+		info, err := os.Stat(activeCLI)
+		if err != nil {
+			return nil, fmt.Errorf("cannot inspect the active ctxpm CLI: %w", err)
+		}
+		tmp, err := os.CreateTemp("", "ctxpm-active-*")
+		if err != nil {
+			return nil, err
+		}
+		activeCLISnapshot = tmp.Name()
+		if err := tmp.Close(); err != nil {
+			_ = os.Remove(activeCLISnapshot)
+			return nil, err
+		}
+		defer os.Remove(activeCLISnapshot)
+		activeCLIMode = info.Mode()
+		if err := copyFile(activeCLI, activeCLISnapshot, activeCLIMode); err != nil {
+			return nil, fmt.Errorf("cannot preserve the active ctxpm CLI: %w", err)
+		}
+	}
 	destination := filepath.Join(a.Root, filepath.FromSlash(resource.Path))
 	if err := replacePath(resolved.LocalPath, destination); err != nil {
 		return nil, err
+	}
+	if activeCLISnapshot != "" {
+		cliPath := filepath.Join(destination, "cli", "ctxpm")
+		if err := copyFile(activeCLISnapshot, cliPath, activeCLIMode); err != nil {
+			return nil, fmt.Errorf("cannot restore the project-local ctxpm CLI: %w", err)
+		}
 	}
 	if err := ensureCompatibility(a.Root, agents, *resource); err != nil {
 		return nil, err
@@ -1531,6 +1735,7 @@ func compatibilityGitignoreRules(agents []string, resources []manifest.Resource)
 }
 
 type cachedCheckState struct {
+	SchemaVersion   int                `json:"schema_version"`
 	Status          string             `json:"status"`
 	CheckedAt       string             `json:"checked_at"`
 	LastFullCheckAt string             `json:"last_full_check_at"`
@@ -1545,6 +1750,9 @@ func maybeReuseCheckState(statePath string, now time.Time, interval string) (*Ch
 	}
 	var cached cachedCheckState
 	if err := json.Unmarshal(data, &cached); err != nil {
+		return nil, false
+	}
+	if cached.SchemaVersion != 3 {
 		return nil, false
 	}
 	last, err := time.Parse(time.RFC3339, cached.CheckedAt)
@@ -1573,9 +1781,10 @@ func writeCheckState(statePath string, result *CheckUpdatesResult) error {
 		return err
 	}
 	data, err := json.MarshalIndent(cachedCheckState{
-		Status:       result.Status,
-		CheckedAt:    result.CheckedAt,
-		Dependencies: result.Dependencies,
+		SchemaVersion: 3,
+		Status:        result.Status,
+		CheckedAt:     result.CheckedAt,
+		Dependencies:  result.Dependencies,
 	}, "", "  ")
 	if err != nil {
 		return err
@@ -1651,6 +1860,15 @@ func resourceNames(resources []manifest.Resource) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+func findDependency(resources []manifest.Resource, name string) (manifest.Resource, bool) {
+	for _, resource := range resources {
+		if resource.Name == name {
+			return resource, true
+		}
+	}
+	return manifest.Resource{}, false
 }
 
 func fallbackString(value, fallback string) string {
