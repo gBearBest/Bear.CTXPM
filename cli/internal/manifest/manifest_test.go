@@ -7,12 +7,16 @@ import (
 	"testing"
 )
 
-func TestManagedEntrypointRequiresSilentRoutineChecks(t *testing.T) {
+func TestManagedEntrypointPreservesBootstrapContract(t *testing.T) {
 	entrypoint := ManagedEntrypoint()
 	for _, want := range []string{
-		"Keep routine `ctxpm` checks silent.",
-		"no dependency updates, migration candidates, or other actionable `ctxpm` issues",
-		"do not mention `ctxpm` in progress updates or the final response",
+		"read the bundled skill",
+		"Read `ctxpm.yaml` first",
+		"`.ctxpm/packages/` before external resources under `.ctxpm/dependencies/`",
+		"run `ctxpm detect` periodically",
+		"run `ctxpm check-updates` when `update_policy` says the check is enabled and due",
+		"Keep non-actionable results silent.",
+		"Get user confirmation before `ctxpm update` or `ctxpm migrate`",
 	} {
 		if !strings.Contains(entrypoint, want) {
 			t.Errorf("ManagedEntrypoint() does not contain %q", want)

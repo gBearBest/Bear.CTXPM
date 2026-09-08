@@ -4,6 +4,24 @@
 
 Managed resource types include `skill`, `rule`, `spec`, `prompt`, `memory`, and `mcp`.
 
+## Resource Discovery and Precedence
+
+Read managed project context in this order:
+
+1. Read `ctxpm.yaml` as the canonical declaration of agent profiles, managed resources, and `update_policy`.
+2. Read task-relevant resources under `.ctxpm/packages/` before `.ctxpm/dependencies/`.
+3. Within each root, use this default priority: `rules`, `skills`, `specs`, `prompts`, then `mcp`.
+4. Read `memories` only when the task depends on project history, prior decisions, terminology, or known pitfalls.
+
+When resources conflict, project-maintained `packages` override external `dependencies`, and `rules` override `memories`.
+
+## Management Boundary
+
+- Do not install or maintain AI resources directly in agent default discovery locations. Keep canonical content under `.ctxpm/` and let ctxpm create derived compatibility links.
+- Store external resources under `.ctxpm/dependencies/` and record their `source` and source-appropriate `version` in `ctxpm.yaml`.
+- Store project-maintained resources under `.ctxpm/packages/` and register them in `ctxpm.yaml`.
+- Use the bundled CLI for lifecycle operations when it is available. Do not hand-edit managed artifacts when the CLI can perform the operation.
+
 ## Canonical Resource Root
 
 Treat the bundled `ctxpm` skill as a **directory resource root**, not a single Markdown file.
