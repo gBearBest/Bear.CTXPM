@@ -3,8 +3,26 @@ package manifest
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestManagedEntrypointPreservesBootstrapContract(t *testing.T) {
+	entrypoint := ManagedEntrypoint()
+	for _, want := range []string{
+		"read the bundled skill",
+		"Read `ctxpm.yaml` first",
+		"`.ctxpm/packages/` before external resources under `.ctxpm/dependencies/`",
+		"run `ctxpm detect` periodically",
+		"run `ctxpm check-updates` when `update_policy` says the check is enabled and due",
+		"Keep non-actionable results silent.",
+		"Get user confirmation before `ctxpm update` or `ctxpm migrate`",
+	} {
+		if !strings.Contains(entrypoint, want) {
+			t.Errorf("ManagedEntrypoint() does not contain %q", want)
+		}
+	}
+}
 
 func TestValidateCurrentVersionMultiFileURLResource(t *testing.T) {
 	resource := Resource{

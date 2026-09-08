@@ -4,6 +4,24 @@
 
 Managed resource types include `skill`, `rule`, `spec`, `prompt`, `memory`, and `mcp`.
 
+## Resource Discovery and Precedence
+
+Read managed project context in this order:
+
+1. Read `ctxpm.yaml` as the canonical declaration of agent profiles, managed resources, and `update_policy`.
+2. Read task-relevant resources under `.ctxpm/packages/` before `.ctxpm/dependencies/`.
+3. Within each root, use this default priority: `rules`, `skills`, `specs`, `prompts`, then `mcp`.
+4. Read `memories` only when the task depends on project history, prior decisions, terminology, or known pitfalls.
+
+When resources conflict, project-maintained `packages` override external `dependencies`, and `rules` override `memories`.
+
+## Management Boundary
+
+- Do not install or maintain AI resources directly in agent default discovery locations. Keep canonical content under `.ctxpm/` and let ctxpm create derived compatibility links.
+- Store external resources under `.ctxpm/dependencies/` and record their `source` and source-appropriate `version` in `ctxpm.yaml`.
+- Store project-maintained resources under `.ctxpm/packages/` and register them in `ctxpm.yaml`.
+- Use the bundled CLI for lifecycle operations when it is available. Do not hand-edit managed artifacts when the CLI can perform the operation.
+
 ## Canonical Resource Root
 
 Treat the bundled `ctxpm` skill as a **directory resource root**, not a single Markdown file.
@@ -55,19 +73,22 @@ dependencies:
       url: https://github.com/gBearBest/Bear.CTXPM
       path: resources/skills/ctxpm
       entry: SKILL.md
-      ref: main
-    version: 0123456789abcdef0123456789abcdef01234567
+      ref: latest
+    version: v0.1.14
 ```
 
 Rules:
 
 - Do not model the bundled `ctxpm` skill as a single-file URL dependency.
 - Register the full skill directory as the resource root.
+- Treat the registered `ctxpm` dependency as the complete ctxpm release unit. Updating it upgrades the CLI, bundled skill, and managed entrypoint together.
+- Record the normalized GitHub Release tag, such as `v0.1.14`, as the ctxpm dependency version.
 
 ## Version Rules
 
 External dependency versions must describe the resolved resource root:
 
+- The special `ctxpm` release unit uses its normalized GitHub Release tag (`vX.Y.Z`).
 - Git resources use the full commit SHA of the latest commit that changed `source.path` at or before the installed checkout.
 - Single-file non-Git resources use `sha256:<hex>`.
 - Directory non-Git resources use `sha256tree:<hex>`.
@@ -79,7 +100,6 @@ For multi-file URL or archive resources, compute the version from the full direc
 When the companion CLI is available, prefer it for routine lifecycle operations:
 
 - `ctxpm install`
-- `ctxpm entrypoint sync`
 - `ctxpm entrypoint doctor`
 - `ctxpm detect`
 - `ctxpm migrate`
@@ -88,7 +108,6 @@ When the companion CLI is available, prefer it for routine lifecycle operations:
 - `ctxpm validate`
 - `ctxpm check-updates`
 - `ctxpm update`
-- `ctxpm self-update`
 - `ctxpm remove`
 - `ctxpm memory search`
 - `ctxpm memory suggest`
@@ -97,17 +116,19 @@ When the companion CLI is available, prefer it for routine lifecycle operations:
 
 For the full command reference — flags, options, and usage guidance for each command — read [`cli/README.md`](cli/README.md).
 
-Run `ctxpm detect` on a shorter cadence than `ctxpm check-updates` so newly added AI resources in non-ctxpm locations are caught early, then migrate them and validate the result after user confirmation.
+Run `ctxpm detect` on a shorter cadence than `ctxpm check-updates` so newly added AI resources in non-ctxpm locations are caught early. Ask for user confirmation only when migration candidates are found, then migrate them and validate the result.
 
 If the CLI is unavailable, follow the same protocol manually instead of inventing a partial workflow.
 
-Use `ctxpm self-update` when the command-line tool itself needs to be upgraded. This is independent of `ctxpm update`, which updates AI resources declared in `ctxpm.yaml`. It supports both global installs and the project-local `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm` binary.
+Use `ctxpm update ctxpm` to upgrade the complete ctxpm release unit explicitly; `ctxpm update --all` includes it when an update is available. Every `ctxpm install` installs the ctxpm Release locked in `ctxpm.yaml`, restores its complete skill snapshot and managed entrypoint from that Release binary, and keeps its CLI beside the skill without changing a separate global installation.
 
-## Conversational Update Workflow
+## Conversational Maintenance Workflow
 
-At a session boundary, if `update_policy` says dependency checks are enabled and due, run the bundled CLI's `check-updates` command first. If updates are available, tell the user and wait for explicit confirmation before running `ctxpm update` or `ctxpm update --all` with the bundled CLI. Use the CLI for the actual resource rewrite and reinstall step; do not hand-edit resource files when the CLI can perform the update.
+Perform routine read-only `ctxpm` checks without narrating them. At a session boundary, if `update_policy` says dependency checks are enabled and due, run the bundled CLI's `check-updates` command first. If updates are available, tell the user and wait for explicit confirmation before running `ctxpm update` or `ctxpm update --all` with the bundled CLI. Use the CLI for the actual resource rewrite and reinstall step; do not hand-edit resource files when the CLI can perform the update.
 
-If the target update is the bundled `ctxpm` skill itself, use the same CLI path and reload the updated skill only at the next safe boundary.
+If `check-updates` reports no updates, `detect` reports no migration candidates, and no other actionable `ctxpm` issue exists, make no user-facing mention of `ctxpm` and continue the user's current request immediately. Surface only findings that require user confirmation or action, or that block or materially affect the request.
+
+If the `ctxpm` release unit is updated, reload the updated skill only at the next safe boundary.
 
 ## Compact `ctxpm.yaml` Reference
 
@@ -157,7 +178,7 @@ Use `.ctxpm/AGENTS.md` as the canonical managed entrypoint source file. All root
 4. For dependencies, record `source` and `version`.
 5. Repair compatibility exposure paths.
 6. Ensure `.gitignore` includes safe ignore rules for repaired compatibility paths.
-7. Keep the shared root entrypoint topology healthy with `ctxpm entrypoint sync` and inspect drift with `ctxpm entrypoint doctor`.
+7. Run `ctxpm install` to repair the shared root entrypoint topology from the installed ctxpm Release's embedded template, and inspect drift with `ctxpm entrypoint doctor`.
 
 ### Validate
 
@@ -170,8 +191,7 @@ Use `.ctxpm/AGENTS.md` as the canonical managed entrypoint source file. All root
 
 ### Update
 
-1. Resolve the upstream resource root.
-2. Recompute the root version.
-3. Replace the canonical root.
-4. Repair compatibility links.
-5. Only update `ctxpm.yaml` when the dependency version actually changed.
+1. Resolve the upstream resource root, recompute its version, replace the canonical root, and repair compatibility links.
+2. Treat `ctxpm` as a special dependency whose update upgrades the CLI, bundled skill, and entrypoint template together from the latest release.
+3. After installing updates, refresh the managed entrypoint block from the selected ctxpm Release's embedded template.
+4. Only update `ctxpm.yaml` when a recorded resource version actually changed.

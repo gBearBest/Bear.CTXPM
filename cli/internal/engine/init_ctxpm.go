@@ -9,7 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime/debug"
+	"sort"
 	"strings"
 	"time"
 
@@ -140,8 +140,13 @@ type bundledCtxpmResult struct {
 	Warnings       []string
 }
 
-func ensureBundledCtxpm(root string, agents []string) (*bundledCtxpmResult, error) {
-	resource := bundledCtxpmResource(agents)
+type bundledCtxpmFile struct {
+	Content string
+	Mode    os.FileMode
+}
+
+func ensureBundledCtxpm(root string, agents []string, releaseVersion string) (*bundledCtxpmResult, error) {
+	resource := bundledCtxpmResource(agents, releaseVersion)
 	created := []string{}
 	result := &bundledCtxpmResult{
 		Resource:   resource,
@@ -153,30 +158,28 @@ func ensureBundledCtxpm(root string, agents []string) (*bundledCtxpmResult, erro
 	if err := os.MkdirAll(resourceRoot, 0o755); err != nil {
 		return nil, err
 	}
+	if err := cleanBundledCtxpmSkill(resourceRoot); err != nil {
+		return nil, err
+	}
 	created = append(created, resourceRoot)
 
-	skillPath := filepath.Join(resourceRoot, "SKILL.md")
-	if err := os.WriteFile(skillPath, []byte(bundledCtxpmSkillContent), 0o644); err != nil {
-		return nil, err
+	for _, relative := range bundledCtxpmSkillPaths() {
+		file := bundledCtxpmSkillFiles[relative]
+		target := filepath.Join(resourceRoot, filepath.FromSlash(relative))
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return nil, err
+		}
+		if err := os.WriteFile(target, []byte(file.Content), file.Mode); err != nil {
+			return nil, err
+		}
+		created = append(created, target)
 	}
-	created = append(created, skillPath)
 
-	yamlPath := filepath.Join(resourceRoot, "ctxpm-yaml.md")
-	if err := os.WriteFile(yamlPath, []byte(bundledCtxpmYAMLContent), 0o644); err != nil {
-		return nil, err
-	}
-	created = append(created, yamlPath)
 	cliPath := filepath.Join(resourceRoot, "cli", "ctxpm")
 	if err := os.MkdirAll(filepath.Dir(cliPath), 0o755); err != nil {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("could not prepare local CLI directory: %v", err))
 	} else {
 		created = append(created, filepath.Dir(cliPath))
-		cliReadmePath := filepath.Join(filepath.Dir(cliPath), "README.md")
-		if err := os.WriteFile(cliReadmePath, []byte(bundledCtxpmCLIReadmeContent), 0o644); err != nil {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("could not write CLI README: %v", err))
-		} else {
-			created = append(created, cliReadmePath)
-		}
 		status, warnings := prepareBundledCLI(context.Background(), cliPath, root)
 		result.LocalCLIStatus = status
 		result.Warnings = append(result.Warnings, warnings...)
@@ -198,7 +201,7 @@ func ensureBundledCtxpm(root string, agents []string) (*bundledCtxpmResult, erro
 	return result, nil
 }
 
-func bundledCtxpmResource(agents []string) manifest.Resource {
+func bundledCtxpmResource(agents []string, releaseVersion string) manifest.Resource {
 	return manifest.Resource{
 		Name:   "ctxpm",
 		Type:   "skill",
@@ -209,31 +212,74 @@ func bundledCtxpmResource(agents []string) manifest.Resource {
 			Type:  "git",
 			URL:   "https://github.com/gBearBest/Bear.CTXPM",
 			Path:  "resources/skills/ctxpm",
+			Ref:   "latest",
 			Entry: "SKILL.md",
 		},
-		Version: currentBuildRevision(),
+		Version: canonicalCtxpmReleaseVersion(releaseVersion),
 	}
 }
 
-func currentBuildRevision() string {
-	info, ok := debug.ReadBuildInfo()
-	if !ok {
-		return ""
+func bundledCtxpmSkillPaths() []string {
+	paths := make([]string, 0, len(bundledCtxpmSkillFiles))
+	for relative := range bundledCtxpmSkillFiles {
+		paths = append(paths, relative)
 	}
-	for _, setting := range info.Settings {
-		if setting.Key == "vcs.revision" {
-			return setting.Value
+	sort.Strings(paths)
+	return paths
+}
+
+func bundledCtxpmSkillDirectories() map[string]bool {
+	directories := map[string]bool{}
+	for relative := range bundledCtxpmSkillFiles {
+		for directory := filepath.ToSlash(filepath.Dir(filepath.FromSlash(relative))); directory != "."; directory = filepath.ToSlash(filepath.Dir(filepath.FromSlash(directory))) {
+			directories[directory] = true
 		}
 	}
-	return ""
+	return directories
+}
+
+func cleanBundledCtxpmSkill(root string) error {
+	directories := []string{}
+	if err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if path == root {
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		relative = filepath.ToSlash(relative)
+		if info.IsDir() {
+			directories = append(directories, path)
+			return nil
+		}
+		if relative == "cli/ctxpm" || relative == "cli/ctxpm.exe" {
+			return nil
+		}
+		return os.Remove(path)
+	}); err != nil {
+		return err
+	}
+	for i := len(directories) - 1; i >= 0; i-- {
+		relative, err := filepath.Rel(root, directories[i])
+		if err != nil {
+			return err
+		}
+		if filepath.ToSlash(relative) == "cli" {
+			continue
+		}
+		if err := os.Remove(directories[i]); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 func prepareBundledCLI(ctx context.Context, targetPath, projectRoot string) (string, []string) {
 	warnings := []string{}
-	if err := verifyBundledCLI(targetPath); err == nil {
-		return "verified-existing", nil
-	}
-
 	sources := []string{}
 	if executable, err := os.Executable(); err == nil {
 		sources = append(sources, executable)
@@ -243,6 +289,10 @@ func prepareBundledCLI(ctx context.Context, targetPath, projectRoot string) (str
 	}
 	for _, source := range dedupe(sources) {
 		if samePath(source, targetPath) {
+			if err := verifyBundledCLI(targetPath); err == nil {
+				return "verified-current", warnings
+			}
+			warnings = append(warnings, fmt.Sprintf("current project-local CLI failed verification: %s", targetPath))
 			continue
 		}
 		info, err := os.Stat(source)
@@ -258,7 +308,10 @@ func prepareBundledCLI(ctx context.Context, targetPath, projectRoot string) (str
 			warnings = append(warnings, fmt.Sprintf("copied CLI from %s but verification failed: %v", source, err))
 			continue
 		}
-		return "installed-and-verified", warnings
+		return "synchronized-and-verified", warnings
+	}
+	if err := verifyBundledCLI(targetPath); err == nil {
+		return "verified-existing", warnings
 	}
 	if err := installBundledCLIRemotely(ctx, projectRoot); err == nil {
 		if err := verifyBundledCLI(targetPath); err == nil {

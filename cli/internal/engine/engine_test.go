@@ -4,12 +4,14 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gBearBest/Bear.CTXPM/cli/internal/manifest"
 )
@@ -261,7 +263,7 @@ func TestInstallIndexesCanonicalDependencyFromCtxpmDirectory(t *testing.T) {
 func TestInitCreatesV2Manifest(t *testing.T) {
 	root := t.TempDir()
 	app := New(root)
-	result, err := app.Init(InitOptions{Agent: "generic"})
+	result, err := app.Init(InitOptions{Agent: "generic", CurrentVersion: "v1.2.3+abcdef"})
 	if err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
@@ -285,7 +287,10 @@ func TestInitCreatesV2Manifest(t *testing.T) {
 	if ctxpm.Name != "ctxpm" || ctxpm.Layout != manifest.LayoutDir || ctxpm.Entry != "SKILL.md" {
 		t.Fatalf("ctxpm dependency = %+v", ctxpm)
 	}
-	if ctxpm.Source == nil || ctxpm.Source.Path != "resources/skills/ctxpm" || ctxpm.Source.Entry != "SKILL.md" {
+	if ctxpm.Version != "v1.2.3" {
+		t.Fatalf("ctxpm release version = %q, want v1.2.3", ctxpm.Version)
+	}
+	if ctxpm.Source == nil || ctxpm.Source.Path != "resources/skills/ctxpm" || ctxpm.Source.Ref != "latest" || ctxpm.Source.Entry != "SKILL.md" {
 		t.Fatalf("ctxpm source = %+v", ctxpm.Source)
 	}
 	if got := readFileForTest(t, filepath.Join(root, "AGENTS.md")); got != manifest.ManagedEntrypoint() {
@@ -407,13 +412,41 @@ func TestInitGuidesMergeWhenMultipleLegacyEntrypointsExist(t *testing.T) {
 }
 
 func TestBundledCtxpmAssetsStayInSyncWithResources(t *testing.T) {
-	skillResource := readRepoFileForTest(t, "../../../resources/skills/ctxpm/SKILL.md")
-	yamlResource := readRepoFileForTest(t, "../../../resources/skills/ctxpm/ctxpm-yaml.md")
-	if bundledCtxpmSkillContent != skillResource {
-		t.Fatalf("generated bundled ctxpm skill does not match resources/skills/ctxpm/SKILL.md")
+	root := filepath.Clean("../../../resources/skills/ctxpm")
+	seen := map[string]bool{}
+	if err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		relative = filepath.ToSlash(relative)
+		if relative == "cli/ctxpm" || relative == "cli/ctxpm.exe" {
+			return nil
+		}
+		file, ok := bundledCtxpmSkillFiles[relative]
+		if !ok {
+			t.Errorf("resource file %s is not embedded", relative)
+			return nil
+		}
+		if file.Content != readRepoFileForTest(t, filepath.Join(root, relative)) {
+			t.Errorf("embedded resource %s does not match its source", relative)
+		}
+		if file.Mode.Perm() != info.Mode().Perm() {
+			t.Errorf("embedded resource %s mode = %v, want %v", relative, file.Mode.Perm(), info.Mode().Perm())
+		}
+		seen[relative] = true
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
-	if bundledCtxpmYAMLContent != yamlResource {
-		t.Fatalf("generated bundled ctxpm yaml does not match resources/skills/ctxpm/ctxpm-yaml.md")
+	if len(seen) != len(bundledCtxpmSkillFiles) {
+		t.Fatalf("embedded files = %d, resource files = %d", len(bundledCtxpmSkillFiles), len(seen))
 	}
 }
 
@@ -875,7 +908,7 @@ func TestValidateReportsMissingEntrypointAlias(t *testing.T) {
 	}
 }
 
-func TestEntrypointSyncCreatesSharedAliases(t *testing.T) {
+func TestInstallCreatesSharedEntrypointAliases(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "CLAUDE.md"), []byte("hello\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
@@ -892,12 +925,12 @@ func TestEntrypointSyncCreatesSharedAliases(t *testing.T) {
 	})
 
 	app := New(root)
-	result, err := app.EntrypointSync()
+	result, err := app.Install(context.Background(), InstallOptions{})
 	if err != nil {
-		t.Fatalf("EntrypointSync() error = %v", err)
+		t.Fatalf("Install() error = %v", err)
 	}
 	if result.Status != "applied" {
-		t.Fatalf("EntrypointSync() status = %q", result.Status)
+		t.Fatalf("Install() status = %q", result.Status)
 	}
 	if got := readFileForTest(t, filepath.Join(root, "AGENTS.md")); got != "hello\n\n"+manifest.ManagedEntrypoint()+"\n" {
 		t.Fatalf("AGENTS.md mismatch\n--- got ---\n%s", got)
@@ -986,6 +1019,15 @@ func TestDetectFindsUnmanagedCompatibilityResource(t *testing.T) {
 
 func TestMigrateMovesCompatibilityResourceAndValidates(t *testing.T) {
 	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".ctxpm"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(.ctxpm) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".ctxpm", "AGENTS.md"), []byte(manifest.ManagedEntrypoint()), 0o644); err != nil {
+		t.Fatalf("WriteFile(.ctxpm/AGENTS.md) error = %v", err)
+	}
+	if err := os.Symlink(".ctxpm/AGENTS.md", filepath.Join(root, "AGENTS.md")); err != nil {
+		t.Fatalf("Symlink(AGENTS.md) error = %v", err)
+	}
 	if err := os.MkdirAll(filepath.Join(root, ".agents", "skills", "reviewer"), 0o755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
@@ -1278,6 +1320,429 @@ func TestInstallPreparesBundledCtxpmLocalCLI(t *testing.T) {
 	}
 }
 
+func TestInstallUsesDeclaredSourceForCtxpmDependency(t *testing.T) {
+	server := newCtxpmSkillUpdateServer(t, "# remote ctxpm\n")
+	defer server.Close()
+	root := t.TempDir()
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version: manifest.CurrentManifestVersion,
+		Project: manifest.Project{Name: "sample"},
+		Agents:  []string{"generic"},
+		Dependencies: []manifest.Resource{
+			{
+				Name:   "ctxpm",
+				Type:   "skill",
+				Layout: manifest.LayoutDir,
+				Path:   ".ctxpm/dependencies/skills/ctxpm",
+				Entry:  "SKILL.md",
+				Source: &manifest.Source{
+					Type:  "url",
+					URL:   server.URL + "/",
+					Files: []string{"SKILL.md", "ctxpm-yaml.md", "cli/README.md"},
+					Entry: "SKILL.md",
+				},
+			},
+		},
+		Packages: []manifest.Resource{},
+	})
+
+	result, err := New(root).Install(context.Background(), InstallOptions{Only: "ctxpm"})
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if len(result.Actions) < 1 || result.Actions[0].Status != "installed" {
+		t.Fatalf("Install() actions = %+v", result.Actions)
+	}
+	if got := readFileForTest(t, filepath.Join(root, ".ctxpm/dependencies/skills/ctxpm/SKILL.md")); got != "# remote ctxpm\n" {
+		t.Fatalf("installed ctxpm skill = %q", got)
+	}
+}
+
+func TestInstallUsesBundledCtxpmSnapshotForReleaseSync(t *testing.T) {
+	root := t.TempDir()
+	obsoleteDir := filepath.Join(root, ".ctxpm/dependencies/skills/ctxpm/legacy")
+	obsolete := filepath.Join(obsoleteDir, "obsolete.md")
+	if err := os.MkdirAll(filepath.Dir(obsolete), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(obsolete, []byte("obsolete"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version: manifest.CurrentManifestVersion,
+		Project: manifest.Project{Name: "sample"},
+		Agents:  []string{"generic"},
+		Dependencies: []manifest.Resource{
+			{
+				Name:   "ctxpm",
+				Type:   "skill",
+				Layout: manifest.LayoutDir,
+				Path:   ".ctxpm/dependencies/skills/ctxpm",
+				Entry:  "SKILL.md",
+				Source: &manifest.Source{
+					Type:  "git",
+					URL:   "https://invalid.example/should-not-be-fetched.git",
+					Path:  "resources/skills/ctxpm",
+					Entry: "SKILL.md",
+				},
+				Version: "stale",
+			},
+		},
+		Packages: []manifest.Resource{},
+	})
+
+	result, err := New(root).Install(context.Background(), InstallOptions{Only: "ctxpm", BundledCtxpmRelease: true})
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if len(result.Actions) < 1 || result.Actions[0].Status != "installed_bundled" {
+		t.Fatalf("Install() actions = %+v", result.Actions)
+	}
+	for relative, file := range bundledCtxpmSkillFiles {
+		target := filepath.Join(root, ".ctxpm/dependencies/skills/ctxpm", filepath.FromSlash(relative))
+		if got := readFileForTest(t, target); got != file.Content {
+			t.Fatalf("bundled ctxpm file %s does not match the current CLI bundle", relative)
+		}
+		info, err := os.Stat(target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != file.Mode.Perm() {
+			t.Fatalf("bundled ctxpm file %s mode = %v, want %v", relative, info.Mode().Perm(), file.Mode.Perm())
+		}
+	}
+	if _, err := os.Stat(obsolete); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("obsolete bundled skill file was not removed: %v", err)
+	}
+	if _, err := os.Stat(obsoleteDir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("obsolete bundled skill directory was not removed: %v", err)
+	}
+}
+
+func TestInstallUsesCtxpmReleaseLockedInManifest(t *testing.T) {
+	root := t.TempDir()
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version: manifest.CurrentManifestVersion,
+		Project: manifest.Project{Name: "sample"},
+		Agents:  []string{"generic"},
+		Dependencies: []manifest.Resource{{
+			Name: "ctxpm", Type: "skill", Layout: manifest.LayoutDir,
+			Path: ".ctxpm/dependencies/skills/ctxpm", Entry: "SKILL.md",
+			Source:  &manifest.Source{Type: "git", URL: "https://invalid.example/ctxpm.git", Path: "resources/skills/ctxpm", Entry: "SKILL.md"},
+			Version: "v1.2.3",
+		}},
+		Packages: []manifest.Resource{},
+	})
+
+	previousInstaller := ctxpmReleaseInstallHook
+	defer func() { ctxpmReleaseInstallHook = previousInstaller }()
+	ctxpmReleaseInstallHook = func(_ *App, _ context.Context, opts CtxpmReleaseUpdateOptions) (*CtxpmReleaseUpdateResult, error) {
+		if opts.Version != "v1.2.3" || opts.CurrentVersion != "v1.0.0" || opts.Force {
+			t.Fatalf("release install options = %+v", opts)
+		}
+		return &CtxpmReleaseUpdateResult{Status: "updated", CurrentVersion: opts.CurrentVersion, LatestVersion: opts.Version, Installed: true, BundleSynced: true}, nil
+	}
+
+	result, err := New(root).Install(context.Background(), InstallOptions{Only: "ctxpm", CurrentVersion: "v1.0.0+abcdef"})
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if len(result.Actions) != 1 || result.Actions[0].Kind != "release" || result.Actions[0].Status != "installed_release" || result.Actions[0].Version != "v1.2.3" {
+		t.Fatalf("Install() actions = %+v", result.Actions)
+	}
+}
+
+func TestInstallDoesNotApplyActiveEntrypointBeforeLockedRelease(t *testing.T) {
+	root := t.TempDir()
+	entrypoint := filepath.Join(root, ".ctxpm", "AGENTS.md")
+	if err := os.MkdirAll(filepath.Dir(entrypoint), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	original := "<!-- ctxpm:begin -->\nlocked release instructions\n<!-- ctxpm:end -->\n"
+	if err := os.WriteFile(entrypoint, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version: manifest.CurrentManifestVersion,
+		Project: manifest.Project{Name: "sample"},
+		Agents:  []string{"generic"},
+		Dependencies: []manifest.Resource{{
+			Name: "ctxpm", Type: "skill", Layout: manifest.LayoutDir,
+			Path: ".ctxpm/dependencies/skills/ctxpm", Entry: "SKILL.md",
+			Source:  &manifest.Source{Type: "git", URL: "https://example.invalid/ctxpm.git", Path: "resources/skills/ctxpm", Entry: "SKILL.md"},
+			Version: "v1.2.3",
+		}},
+		Packages: []manifest.Resource{},
+	})
+
+	previousInstaller := ctxpmReleaseInstallHook
+	defer func() { ctxpmReleaseInstallHook = previousInstaller }()
+	ctxpmReleaseInstallHook = func(_ *App, _ context.Context, _ CtxpmReleaseUpdateOptions) (*CtxpmReleaseUpdateResult, error) {
+		if got := readFileForTest(t, entrypoint); got != original {
+			t.Fatalf("entrypoint changed before locked release installation\n%s", got)
+		}
+		return nil, errors.New("simulated release download failure")
+	}
+
+	if _, err := New(root).Install(context.Background(), InstallOptions{Only: "ctxpm", CurrentVersion: "v1.0.0"}); err == nil {
+		t.Fatal("Install() error = nil, want release failure")
+	}
+	if got := readFileForTest(t, entrypoint); got != original {
+		t.Fatalf("entrypoint changed after failed locked release installation\n%s", got)
+	}
+}
+
+func TestInstallRefreshesEntrypointFromCurrentCLIBundle(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".ctxpm"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	entrypoint := filepath.Join(root, ".ctxpm", "AGENTS.md")
+	original := "Project notes\n\n<!-- ctxpm:begin -->\nstale\n<!-- ctxpm:end -->\n\nFooter\n"
+	if err := os.WriteFile(entrypoint, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version:      manifest.CurrentManifestVersion,
+		Project:      manifest.Project{Name: "sample"},
+		Agents:       []string{"generic"},
+		Dependencies: []manifest.Resource{},
+		Packages:     []manifest.Resource{},
+	})
+
+	if _, err := New(root).Install(context.Background(), InstallOptions{}); err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	want := "Project notes\n\n" + manifest.ManagedEntrypoint() + "\n\nFooter\n"
+	if got := readFileForTest(t, entrypoint); got != want {
+		t.Fatalf("entrypoint mismatch\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+func TestUpdateAllowsCtxpmAsDependencyTargetAndRefreshesEntrypoint(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		opts UpdateOptions
+	}{
+		{name: "by name", opts: UpdateOptions{Names: []string{"ctxpm"}, CurrentVersion: "v1.0.0"}},
+		{name: "all", opts: UpdateOptions{All: true, CurrentVersion: "v1.0.0"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := newCtxpmSkillUpdateServer(t, "# updated ctxpm\n")
+			defer server.Close()
+			previousReleaseURL := ctxpmLatestReleaseURL
+			ctxpmLatestReleaseURL = server.URL
+			defer func() { ctxpmLatestReleaseURL = previousReleaseURL }()
+			previousUpdater := ctxpmReleaseUpdateHook
+			const releaseVersion = "v9.9.9"
+			ctxpmReleaseUpdateHook = func(app *App, _ context.Context, opts CtxpmReleaseUpdateOptions) (*CtxpmReleaseUpdateResult, error) {
+				if !opts.Force {
+					t.Error("ctxpm dependency updates must reinstall the authoritative release")
+				}
+				if _, err := manifest.UpdateResourceVersions(app.Root, map[string]string{"ctxpm": releaseVersion}); err != nil {
+					return nil, err
+				}
+				resourceRoot := filepath.Join(app.Root, ".ctxpm/dependencies/skills/ctxpm")
+				for relative, file := range bundledCtxpmSkillFiles {
+					target := filepath.Join(resourceRoot, filepath.FromSlash(relative))
+					if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+						return nil, err
+					}
+					if err := os.WriteFile(target, []byte(file.Content), file.Mode); err != nil {
+						return nil, err
+					}
+				}
+				activeCLI, err := currentExecutablePath()
+				if err != nil {
+					return nil, err
+				}
+				info, err := os.Stat(activeCLI)
+				if err != nil {
+					return nil, err
+				}
+				if err := copyFile(activeCLI, filepath.Join(resourceRoot, "cli", "ctxpm"), info.Mode()); err != nil {
+					return nil, err
+				}
+				return &CtxpmReleaseUpdateResult{Status: "updated", CurrentVersion: opts.CurrentVersion, LatestVersion: opts.Version, Installed: true, BundleSynced: true}, nil
+			}
+			defer func() { ctxpmReleaseUpdateHook = previousUpdater }()
+			root := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(root, ".ctxpm"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			entrypoint := filepath.Join(root, ".ctxpm", "AGENTS.md")
+			if err := os.WriteFile(entrypoint, []byte("<!-- ctxpm:begin -->\nstale\n<!-- ctxpm:end -->\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			ctxpmResource := manifest.Resource{
+				Name:    "ctxpm",
+				Type:    "skill",
+				Layout:  manifest.LayoutDir,
+				Path:    ".ctxpm/dependencies/skills/ctxpm",
+				Entry:   "SKILL.md",
+				Source:  &manifest.Source{Type: "git", URL: "https://invalid.example/old-ctxpm.git", Path: "resources/skills/ctxpm", Entry: "SKILL.md"},
+				Version: "0123456789abcdef0123456789abcdef01234567",
+			}
+			writeManifestForTest(t, root, &manifest.Manifest{
+				Version:      manifest.CurrentManifestVersion,
+				Project:      manifest.Project{Name: "sample"},
+				Agents:       []string{"generic"},
+				Dependencies: []manifest.Resource{ctxpmResource},
+				Packages:     []manifest.Resource{},
+			})
+
+			result, err := New(root).Update(context.Background(), test.opts)
+			if err != nil {
+				t.Fatalf("Update() error = %v", err)
+			}
+			if len(result.Applied) != 1 || result.Applied[0].Name != "ctxpm" {
+				t.Fatalf("Update() result = %+v", result)
+			}
+			if result.Applied[0].Kind != "release" {
+				t.Fatalf("Update() action kind = %q, want release", result.Applied[0].Kind)
+			}
+			updatedManifest, _, err := manifest.Load(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			updatedCtxpm, ok := findDependency(updatedManifest.Dependencies, "ctxpm")
+			if !ok || updatedCtxpm.Version != releaseVersion {
+				t.Fatalf("ctxpm release version was overwritten: %+v", updatedCtxpm)
+			}
+			if got := readFileForTest(t, filepath.Join(root, ".ctxpm/dependencies/skills/ctxpm/SKILL.md")); got != bundledCtxpmSkillFiles["SKILL.md"].Content {
+				t.Fatalf("updated ctxpm skill = %q", got)
+			}
+			if got := readFileForTest(t, entrypoint); got != manifest.ManagedEntrypoint() {
+				t.Fatalf("entrypoint was not refreshed from the active CLI bundle\n%s", got)
+			}
+			activeCLI, err := currentExecutablePath()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := verifyProjectLocalCLI(activeCLI, root); err != nil {
+				t.Fatalf("project-local CLI was not preserved: %v", err)
+			}
+		})
+	}
+}
+
+func TestCheckUpdatesReportsCtxpmAsUnifiedDependency(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"tag_name":"v1.0.0"}`))
+	}))
+	defer server.Close()
+	previousURL := ctxpmLatestReleaseURL
+	ctxpmLatestReleaseURL = server.URL
+	defer func() { ctxpmLatestReleaseURL = previousURL }()
+
+	root := t.TempDir()
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version: manifest.CurrentManifestVersion,
+		Project: manifest.Project{Name: "sample"},
+		Agents:  []string{"generic"},
+		Dependencies: []manifest.Resource{
+			{
+				Name:    "ctxpm",
+				Type:    "skill",
+				Layout:  manifest.LayoutDir,
+				Path:    ".ctxpm/dependencies/skills/ctxpm",
+				Entry:   "SKILL.md",
+				Source:  &manifest.Source{Type: "git", URL: "https://invalid.example/ctxpm.git", Path: "resources/skills/ctxpm", Entry: "SKILL.md"},
+				Version: "v0.9.0",
+			},
+		},
+		Packages: []manifest.Resource{},
+	})
+
+	result, err := New(root).CheckUpdates(context.Background(), CheckUpdatesOptions{Force: true, CurrentVersion: "v1.0.0"})
+	if err != nil {
+		t.Fatalf("CheckUpdates() error = %v", err)
+	}
+	if len(result.Dependencies) != 1 || result.Dependencies[0].Name != "ctxpm" {
+		t.Fatalf("ctxpm should be reported as one unified dependency: %+v", result.Dependencies)
+	}
+	ctxpm := result.Dependencies[0]
+	if ctxpm.CurrentVersion != "v0.9.0" || ctxpm.LatestVersion != "v1.0.0" || ctxpm.Status != "update_available" || len(ctxpm.Components) != 3 {
+		t.Fatalf("CheckUpdates() ctxpm = %+v", ctxpm)
+	}
+}
+
+func TestCheckUpdatesHonorsIncludeSelfFalse(t *testing.T) {
+	root := t.TempDir()
+	disabled := false
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version:      manifest.CurrentManifestVersion,
+		Project:      manifest.Project{Name: "sample"},
+		Agents:       []string{"generic"},
+		UpdatePolicy: manifest.UpdatePolicy{IncludeSelf: &disabled},
+		Dependencies: []manifest.Resource{
+			{
+				Name:    "ctxpm",
+				Type:    "skill",
+				Layout:  manifest.LayoutDir,
+				Path:    ".ctxpm/dependencies/skills/ctxpm",
+				Entry:   "SKILL.md",
+				Source:  &manifest.Source{Type: "git", URL: "https://invalid.example/ctxpm.git", Path: "resources/skills/ctxpm", Entry: "SKILL.md"},
+				Version: "old",
+			},
+		},
+		Packages: []manifest.Resource{},
+	})
+
+	result, err := New(root).CheckUpdates(context.Background(), CheckUpdatesOptions{Force: true, CurrentVersion: "v1.0.0"})
+	if err != nil {
+		t.Fatalf("CheckUpdates() error = %v", err)
+	}
+	if len(result.Dependencies) != 0 {
+		t.Fatalf("CheckUpdates() should omit the ctxpm release unit: %+v", result)
+	}
+}
+
+func TestCheckUpdatesRechecksLocalSelfBundleWhenRemoteResultIsCached(t *testing.T) {
+	root := t.TempDir()
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version: manifest.CurrentManifestVersion,
+		Project: manifest.Project{Name: "sample"},
+		Agents:  []string{"generic"},
+		Dependencies: []manifest.Resource{{
+			Name: "ctxpm", Type: "skill", Layout: manifest.LayoutDir,
+			Path: ".ctxpm/dependencies/skills/ctxpm", Entry: "SKILL.md",
+			Source: &manifest.Source{Type: "git", URL: "https://example.invalid/ctxpm.git", Path: "resources/skills/ctxpm", Entry: "SKILL.md"},
+		}},
+		Packages: []manifest.Resource{},
+	})
+	statePath := filepath.Join(root, ".ctxpm", "state", "update-checks.json")
+	if err := writeCheckState(statePath, &CheckUpdatesResult{
+		Status:    "checked",
+		CheckedAt: time.Now().UTC().Format(time.RFC3339),
+		Dependencies: []DependencyUpdate{{
+			Name: "ctxpm", Type: "skill", Path: ".ctxpm/dependencies/skills/ctxpm", SourceType: "release",
+			Status: "up_to_date", CurrentVersion: "v1.0.0", LatestVersion: "v1.0.0",
+			Components: []CtxpmReleaseComponentCheck{{Name: "cli", Status: "up_to_date"}, {Name: "skill", Status: "up_to_date"}, {Name: "entrypoint", Status: "up_to_date"}},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := New(root).CheckUpdates(context.Background(), CheckUpdatesOptions{CurrentVersion: "v1.0.0"})
+	if err != nil {
+		t.Fatalf("CheckUpdates() error = %v", err)
+	}
+	if result.Status != "not_due" || len(result.Dependencies) != 1 || result.Dependencies[0].Status != "update_available" {
+		t.Fatalf("CheckUpdates() result = %+v", result)
+	}
+	entrypointStatus := ""
+	for _, component := range result.Dependencies[0].Components {
+		if component.Name == "entrypoint" {
+			entrypointStatus = component.Status
+		}
+	}
+	if entrypointStatus != "missing" {
+		t.Fatalf("cached check entrypoint status = %q, want missing", entrypointStatus)
+	}
+}
+
 func TestUpdateRefreshesManagedEntrypointBlocks(t *testing.T) {
 	root := t.TempDir()
 	server := newSingleFileUpdateServer(t, "/reviewer.md", "# reviewer\n")
@@ -1488,7 +1953,7 @@ func TestUpdateRunsInstallAfterManifestRefresh(t *testing.T) {
 	}
 }
 
-func TestUpdateReportsDamagedManagedBlock(t *testing.T) {
+func TestUpdateRepairsDamagedManagedBlockDuringInstall(t *testing.T) {
 	root := t.TempDir()
 	server := newSingleFileUpdateServer(t, "/reviewer.md", "# reviewer\n")
 	defer server.Close()
@@ -1526,17 +1991,13 @@ func TestUpdateReportsDamagedManagedBlock(t *testing.T) {
 	})
 
 	app := New(root)
-	_, err := app.Update(context.Background(), UpdateOptions{Names: []string{"reviewer"}})
-	if err == nil {
-		t.Fatal("Update() error = nil, want damaged block error")
-	}
-	if !strings.Contains(err.Error(), "managed ctxpm block is damaged") {
+	if _, err := app.Update(context.Background(), UpdateOptions{Names: []string{"reviewer"}}); err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
-	// File was moved to .ctxpm/AGENTS.md by seedCanonicalEntrypoint; content must be unchanged.
 	movedPath := filepath.Join(root, ".ctxpm", "AGENTS.md")
-	if got := readFileForTest(t, movedPath); got != original {
-		t.Fatalf("damaged entrypoint should remain unchanged\n--- got ---\n%s\n--- want ---\n%s", got, original)
+	want := "Intro\n\n" + manifest.ManagedEntrypoint() + "\n"
+	if got := readFileForTest(t, movedPath); got != want {
+		t.Fatalf("damaged entrypoint was not repaired\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 }
 
@@ -1544,6 +2005,28 @@ func newSingleFileUpdateServer(t *testing.T, path, content string) *httptest.Ser
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != path {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(content))
+	}))
+}
+
+func newCtxpmSkillUpdateServer(t *testing.T, skillContent string) *httptest.Server {
+	t.Helper()
+	files := map[string]string{
+		"/SKILL.md":      skillContent,
+		"/ctxpm-yaml.md": "# ctxpm.yaml\n",
+		"/cli/README.md": "# ctxpm CLI\n",
+	}
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"tag_name":"v9.9.9"}`))
+			return
+		}
+		content, ok := files[r.URL.Path]
+		if !ok {
 			http.NotFound(w, r)
 			return
 		}

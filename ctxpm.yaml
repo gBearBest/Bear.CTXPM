@@ -18,8 +18,9 @@ dependencies:
       type: git
       url: https://github.com/gBearBest/Bear.CTXPM
       path: resources/skills/ctxpm
+      ref: latest
       entry: SKILL.md
-    version: 35538b24d1333a09ba0ed4de097a40ea81c54d9d
+    version: v0.1.14
   - name: git-commit
     type: skill
     layout: dir

@@ -12,23 +12,6 @@ import (
 	"github.com/gBearBest/Bear.CTXPM/cli/internal/manifest"
 )
 
-type EntrypointSyncResult struct {
-	Status    string   `json:"status"`
-	Files     []string `json:"files,omitempty"`
-	GitStaged []string `json:"git_staged,omitempty"`
-}
-
-func (r EntrypointSyncResult) Text() string {
-	lines := []string{"Entrypoint sync status: " + r.Status}
-	for _, item := range r.Files {
-		lines = append(lines, "- "+item)
-	}
-	for _, item := range r.GitStaged {
-		lines = append(lines, "git staged: "+item)
-	}
-	return strings.Join(lines, "\n") + "\n"
-}
-
 type EntrypointDoctorResult struct {
 	OK     bool     `json:"ok"`
 	Issues []string `json:"issues,omitempty"`
@@ -43,36 +26,6 @@ func (r EntrypointDoctorResult) Text() string {
 		lines = append(lines, "- "+issue)
 	}
 	return strings.Join(lines, "\n") + "\n"
-}
-
-func (a *App) EntrypointSync() (*EntrypointSyncResult, error) {
-	if err := ensureManifestVersion(a.Root, false); err != nil {
-		return nil, err
-	}
-	m, _, err := manifest.Load(a.Root)
-	if err != nil {
-		return nil, err
-	}
-	changed := normalizeSharedEntrypoints(m)
-	if changed {
-		if _, err := manifest.Save(a.Root, m); err != nil {
-			return nil, err
-		}
-	}
-	files, err := syncManagedEntrypoints(a.Root, m, false)
-	if err != nil {
-		return nil, err
-	}
-	gitignoreRules := dedupe(append([]string{".ctxpm/dependencies/", ".ctxpm/state/"}, entrypointGitignoreRules(m)...))
-	if _, err := ensureGitignoreRules(filepath.Join(a.Root, ".gitignore"), gitignoreRules); err != nil {
-		return nil, err
-	}
-	files = append(files, filepath.Join(a.Root, ".gitignore"))
-	if changed {
-		files = append(files, filepath.Join(a.Root, "ctxpm.yaml"))
-	}
-	gitStaged := stageEntrypointMigration(a.Root)
-	return &EntrypointSyncResult{Status: "applied", Files: dedupe(files), GitStaged: gitStaged}, nil
 }
 
 func (a *App) EntrypointDoctor() (*EntrypointDoctorResult, error) {
@@ -150,8 +103,7 @@ func validateManagedEntrypoints(root string, m *manifest.Manifest) []string {
 	if len(agents) > 0 {
 		switch state, err := readManagedEntrypointState(sourceAbs); {
 		case errors.Is(err, os.ErrNotExist):
-			// Source file was never created — skip further entrypoint checks.
-			// Run `ctxpm entrypoint sync` to create it.
+			issues = append(issues, fmt.Sprintf("managed entrypoint source %q is missing; run `ctxpm install`", manifest.CanonicalEntrypointSourceFile()))
 		case err != nil:
 			issues = append(issues, err.Error())
 		case !state.HasManagedBlock:
@@ -162,7 +114,7 @@ func validateManagedEntrypoints(root string, m *manifest.Manifest) []string {
 			issues = append(issues, fmt.Sprintf("managed entrypoint source %q has a damaged ctxpm managed block", manifest.CanonicalEntrypointSourceFile()))
 		case strings.TrimRight(state.Block, "\n") != strings.TrimRight(manifest.ManagedEntrypoint(), "\n"):
 			sourceExists = true
-			issues = append(issues, fmt.Sprintf("managed entrypoint source %q is out of date; run `ctxpm entrypoint sync`", manifest.CanonicalEntrypointSourceFile()))
+			issues = append(issues, fmt.Sprintf("managed entrypoint source %q is out of date; run `ctxpm install`", manifest.CanonicalEntrypointSourceFile()))
 		default:
 			sourceExists = true
 		}
@@ -240,7 +192,7 @@ func entrypointMergeGuidance(files []string) string {
 	if len(items) == 1 {
 		label = "root entrypoint file"
 	}
-	return fmt.Sprintf("%s (%s) need manual migration; merge any unique instructions into %s, then rerun `ctxpm entrypoint sync` so the root entrypoint filenames become compatibility symlinks", label, strings.Join(items, ", "), manifest.CanonicalEntrypointSourceFile())
+	return fmt.Sprintf("%s (%s) need manual migration; merge any unique instructions into %s, then rerun `ctxpm install` so the root entrypoint filenames become compatibility symlinks", label, strings.Join(items, ", "), manifest.CanonicalEntrypointSourceFile())
 }
 
 func seedCanonicalEntrypoint(root string, m *manifest.Manifest) error {
