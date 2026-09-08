@@ -1,430 +1,401 @@
 ---
 name: ctxpm-release
-description: Use this skill when publishing a Bear.CTXPM release, preparing a semantic version tag, updating GitHub release notes, or verifying that latest points at the newest stable release.
+description: Prepare and publish Bear.CTXPM releases with the repository's strict Git Flow lifecycle, including release candidates, hotfixes, GitHub Release notes, assets, and latest-tag verification.
 ---
 
 # Bear.CTXPM release workflow
 
-Use this skill for Bear.CTXPM version publishing work.
+Use this skill for Bear.CTXPM release preparation and publication. Keep the
+operator procedure here; do not copy it into public documentation unless the
+user explicitly requests that.
 
-This repository publishes stable releases from semantic version tags such as `v0.1.0`. The public release mechanics live in `.github/workflows/release.yml`, while the human procedure should live in this skill rather than in README or general docs unless the user explicitly asks for public documentation.
+The canonical stable topology is:
 
-## What this skill is for
+```text
+develop -> release/vX.Y.Z -> main + vX.Y.Z -> back-merge vX.Y.Z into develop
+```
 
-- publishing a new stable release such as `v0.1.0`
-- publishing a pre-release tag such as `v0.2.0-rc.1`
-- updating the GitHub Release body after assets are published
-- verifying that `latest` points at the newest stable release
+Use `git-flow` (AVH Edition) for `start`, `publish`, and `finish`. Do not replace
+`git flow ... finish` with an improvised sequence of merges and tags when direct
+pushes are allowed.
 
-## Repository release rules (Git Flow)
+## Authorization boundary
 
-- `main` must continue to represent the newest stable release line
-- `develop` is the ongoing integration branch for the next release
-- stable releases are prepared on `release/vX.Y.Z` branches cut from `develop`
-- release candidates and other pre-release tags are created from the `release/*` branch, not from `main`
-- the final stable tag `vX.Y.Z` is created from `main` only after the release branch is finished into `main`
-- hotfixes are prepared on `hotfix/vX.Y.Z` branches cut from `main`
-- release tags must use semantic version format: `vX.Y.Z`
-- pre-release tags may use a hyphen suffix such as `vX.Y.Z-rc.1`
-- the installer supports `latest` or an explicit version tag such as `v0.1.0`
-- do not use `main` as a release selector
+Determine which outcome the user requested:
 
-## Important repository-specific pitfalls
+- **Prepare**: start or continue the release branch, harden it, validate it,
+  draft release notes, and optionally publish the release branch. Stop before
+  `git flow release finish` and before pushing any stable tag.
+- **Publish**: perform the complete finish, push, GitHub Actions, curated release
+  notes, and verification sequence in the same session.
+- **Pre-release**: publish an `-rc.N` tag from the open release branch without
+  finishing the release or changing `main`.
+- **Hotfix**: start from `main` and use the hotfix lifecycle below.
 
-### 1. Keep the procedure in this skill, not public docs
+Do not infer permission to publish a stable release from a request to prepare,
+inspect, validate, or draft notes.
 
-If future sessions need the release workflow, update this skill. Do not add release-flow explanations to README, INSTALL, or other public docs unless the user explicitly requests that.
+## Repository invariants
 
-### 2. Release notes must be curated
+- Production branch: `main`
+- Integration branch: `develop`
+- Release prefix: `release/`
+- Hotfix prefix: `hotfix/`
+- Version tag prefix: empty; version arguments already include `v`
+- Stable versions: `vX.Y.Z`
+- Pre-release versions: `vX.Y.Z-rc.N`
+- Stable tags are created by `git flow release finish` or
+  `git flow hotfix finish` on the merge commit in `main`.
+- The stable tag is back-merged into `develop` by the same finish operation.
+- Release and hotfix merges must be merge commits. Do not squash or rebase them.
+- `latest` is moved only by `.github/workflows/release.yml`, and only for stable
+  tags.
 
-The workflow creates a GitHub Release automatically, but its default generated notes are not enough. After the release appears, replace or update the release body with a curated summary.
+The version passed to Git Flow is `vX.Y.Z`, not the full branch name. For
+example, use `git flow release finish v0.2.0`, never
+`git flow release finish release/v0.2.0`.
 
-### 3. Do not move `main` forward for pre-releases
+## Preflight
 
-If you want to publish `vX.Y.Z-rc.N`, keep that work on `release/vX.Y.Z`. Tagging a release candidate from `main` would make `main` contain code that is not yet the latest stable release, which breaks this repository's Git Flow contract.
-
-## Standard stable release procedure (Git Flow)
-
-### 1. Verify local state
-
-From the repository root:
+Run from the repository root before changing release state:
 
 ```sh
 git status --short
-git rev-parse --abbrev-ref HEAD
-git log --oneline --decorate -5
+git branch --show-current
+git remote -v
+git flow version
+gh auth status
+test "$(gh api user --jq .login)" = "gBearBest"
+git fetch --prune origin
+git fetch --tags --force origin
 ```
 
-Make sure:
+Require a clean working tree. Do not stash, discard, or absorb unrelated work
+to make it clean.
 
-- the working tree is clean
-- `develop` contains the intended release content
-- `main` still reflects the previous stable release
-- the target version does not already exist as a local or remote tag
-
-Optional checks:
+If Git Flow is not initialized, initialize it once with repository defaults:
 
 ```sh
-git fetch --tags origin
-git tag --list 'v*'
-git ls-remote --tags origin 'v*'
+git flow init -d
 ```
 
-### 2. Create the release branch from `develop`
-
-Example for `v0.1.0`:
+Then verify the effective configuration. Stop if any value differs; do not use
+`git flow init -f` to overwrite configuration silently.
 
 ```sh
-git switch develop
-git pull --ff-only origin develop
-git switch -c release/v0.1.0
+test "$(git config --get gitflow.branch.master)" = "main"
+test "$(git config --get gitflow.branch.develop)" = "develop"
+test "$(git config --get gitflow.prefix.release)" = "release/"
+test "$(git config --get gitflow.prefix.hotfix)" = "hotfix/"
+test -z "$(git config --get gitflow.prefix.versiontag)"
 ```
 
-On `release/v0.1.0`, do only release-hardening work (version bumps, changelog/release-note curation, last-minute fixes allowed by release policy).
-
-### 3. Run the existing validation commands on the release branch
-
-Mirror the workflow's local checks before tagging:
-
-```sh
-(cd cli && make test)
-(cd cli && make build)
-```
-
-If the change is docs-only and the user explicitly says not to run these again, follow that instruction. Otherwise use the same validation path as CI.
-
-### 4. Push the release branch
-
-```sh
-git push -u origin release/v0.1.0
-```
-
-### 5. Create and push the stable tag on the release branch
-
-**IMPORTANT**: Tag the release branch BEFORE merging to main, so both main and develop can see the tag after completion.
-
-```sh
-git switch release/v0.1.0
-git tag -a v0.1.0 -m "Bear.CTXPM v0.1.0"
-git push origin v0.1.0
-```
-
-### 6. Merge the tagged release branch into `main`
-
-Preferred model when branch protection or review is enabled:
-
-1. open a PR from `release/v0.1.0` into `main`
-2. merge it with a merge commit after approval
-
-Equivalent direct git commands:
+Bring both long-lived branches to their remote state with fast-forward-only
+updates:
 
 ```sh
 git switch main
 git pull --ff-only origin main
-git merge --no-ff release/v0.1.0 -m "Merge release/v0.1.0 into main"
-git push origin main
-```
-
-### 7. Back-merge the same release branch into `develop`
-
-Preferred model when branch protection or review is enabled:
-
-1. open a PR from `release/v0.1.0` into `develop`
-2. merge it with a merge commit after approval
-
-Equivalent direct git commands:
-
-```sh
 git switch develop
 git pull --ff-only origin develop
-git merge --no-ff release/v0.1.0 -m "Merge release/v0.1.0 back into develop"
-git push origin develop
 ```
 
-### 8. Delete the release branch after both merges are complete
+Before selecting `vX.Y.Z`, inspect existing releases and the changes since the
+last stable tag. Confirm that the target tag and release or hotfix branch do not
+already exist locally or remotely unless the task is explicitly to continue
+that branch.
 
 ```sh
-git branch -d release/v0.1.0
-git push origin --delete release/v0.1.0
+git tag --list 'v*' --sort=-version:refname
+git log --oneline main..develop
+git show-ref --verify --quiet refs/tags/vX.Y.Z
+git ls-remote --exit-code --tags origin refs/tags/vX.Y.Z
+git show-ref --verify --quiet refs/heads/release/vX.Y.Z
+git ls-remote --exit-code --heads origin refs/heads/release/vX.Y.Z
 ```
 
-### 9. Verify tag visibility from both branches
+The `show-ref` and `ls-remote` checks should report absence for a new version.
+Treat an existing tag as a hard stop; never move or replace a published version
+tag.
 
-Confirm the tag is reachable from both main and develop:
+## Stable release
+
+### 1. Start and publish the release branch
+
+Start from the updated `develop` branch:
 
 ```sh
-git fetch --tags origin
-git switch main
-git tag --merged | grep v0.1.0
 git switch develop
-git tag --merged | grep v0.1.0
+git flow release start vX.Y.Z
 ```
 
-Both commands should show `v0.1.0`. If develop doesn't show it, the tag was created on the wrong commit.
+On `release/vX.Y.Z`, make only release-hardening changes: version metadata,
+curated notes, packaging corrections, and necessary release fixes. Commit all
+intended changes before validation.
 
-### 10. Wait for the GitHub Actions release workflow
-
-The release workflow will:
-
-- run `go test ./...`
-- build assets for:
-  - `darwin/arm64`
-  - `darwin/amd64`
-  - `linux/arm64`
-  - `linux/amd64`
-  - `windows/amd64`
-- generate `checksums.txt`
-- create the GitHub Release for the tag
-- move `latest` to the same commit for stable releases only
-
-Pre-release tags should not advance `latest`.
-
-**The workflow takes 1–3 minutes to complete after the tag is pushed.** Do not attempt to update the release notes before the GitHub Release object exists — `gh release edit` will fail on a non-existent release.
-
-After pushing the tag, wait ~90 seconds before polling:
+Publish the release branch so it is backed up and reviewable:
 
 ```sh
-sleep 90
-gh release view vX.Y.Z --repo gBearBest/Bear.CTXPM --json tagName,isDraft,isPrerelease 2>&1
+git flow release publish vX.Y.Z
 ```
 
-If the release is not yet available, wait another 30 seconds and retry. Do not proceed to step 11 until `gh release view` returns without error.
+If the branch already exists, switch to it and verify it is the intended open
+Git Flow release instead of running `start` again.
 
-### 11. Write and apply curated release notes
+### 2. Validate the exact release commit
 
-**Write the notes file first** (before the release exists if you like — the file is just local):
+Run the repository checks from the release branch:
 
 ```sh
-cat > /tmp/release-notes-vX.Y.Z.md << 'EOF'
+(cd cli && make test)
+(cd cli && make build)
+.ctxpm/dependencies/skills/ctxpm/cli/ctxpm validate
+git status --short
+```
+
+Require every check to pass and the tree to remain clean. Skip validation only
+when the user explicitly narrows it; record any skipped check in the handoff.
+
+Draft curated release notes now, before finishing. Summarize user-visible
+changes and compatibility concerns rather than copying a raw commit list. The
+body should normally contain:
+
+```markdown
 ## Bear.CTXPM vX.Y.Z
 
-Short summary of what this version represents.
+Short release summary.
 
 ## Highlights
 
-- Core protocol or CLI changes
-- Installation or release behavior changes
-- Important compatibility notes
+- Important CLI or protocol changes
+- Installation or update behavior changes
+- Compatibility notes
 
 ## Installation
 
 Install latest stable:
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/latest/cli/install.sh | sh -s -- --scope global
-```
+`curl -fsSL https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/latest/cli/install.sh | sh -s -- --scope global`
 
 Pin this release:
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/latest/cli/install.sh | sh -s -- --scope global --version vX.Y.Z
-```
+`curl -fsSL https://raw.githubusercontent.com/gBearBest/Bear.CTXPM/latest/cli/install.sh | sh -s -- --scope global --version vX.Y.Z`
 
 ## Release assets
 
-See attached archives and `checksums.txt` below.
-EOF
+See the attached archives and `checksums.txt`.
 ```
 
-Focus on what users need to know, not a raw commit dump.
+Keep the notes in a temporary file such as
+`/tmp/bear-ctxpm-release-vX.Y.Z.md` for the later `gh release edit` command.
 
-**Once the release exists**, apply the notes and clean up:
+### 3. Finish locally with Git Flow
+
+Only enter this stage for an explicit stable-publication request. Re-fetch and
+ensure `release/vX.Y.Z`, `main`, and `develop` still match their remote refs.
+Then run:
 
 ```sh
-gh release edit vX.Y.Z --repo gBearBest/Bear.CTXPM --notes-file /tmp/release-notes-vX.Y.Z.md
-rm /tmp/release-notes-vX.Y.Z.md
+git switch release/vX.Y.Z
+git flow release finish --fetch --nopush --keepremote \
+  -m "Bear.CTXPM vX.Y.Z" vX.Y.Z
 ```
 
-### 12. Verify published results
+Do not add `--notag`, `--nobackmerge`, `--nodevelopmerge`, or `--squash`.
+`--keepremote` deliberately retains the remote release branch until the
+completed topology has been published successfully.
 
-Confirm all of the following:
+The finish command must perform all of these local operations:
 
-- the `vX.Y.Z` release exists
-- the release is not marked as draft
-- stable releases are not marked as pre-release
-- expected assets are uploaded
-- `latest` points at the same commit as the stable tag
-- **the tag is visible from both `main` and `develop` branches**
+1. merge `release/vX.Y.Z` into `main` with `--no-ff`
+2. create annotated tag `vX.Y.Z` on the resulting `main` merge commit
+3. merge that stable tag into `develop` with `--no-ff`
+4. delete the local release branch
 
-Useful checks:
+Verify that exact topology before any release ref is pushed:
+
+```sh
+test "$(git rev-parse vX.Y.Z^{})" = "$(git rev-parse main)"
+git merge-base --is-ancestor vX.Y.Z main
+git merge-base --is-ancestor vX.Y.Z develop
+test -z "$(git branch --list release/vX.Y.Z)"
+git status --short
+```
+
+### 4. Publish the completed topology atomically
+
+Push the two long-lived branches and the exact stable tag together. Fully
+qualified refs avoid ambiguity and `--atomic` prevents a partial publication:
+
+```sh
+git push --atomic origin \
+  refs/heads/main:refs/heads/main \
+  refs/heads/develop:refs/heads/develop \
+  refs/tags/vX.Y.Z:refs/tags/vX.Y.Z
+```
+
+After that succeeds, remove the retained remote release branch:
+
+```sh
+git push origin --delete release/vX.Y.Z
+```
+
+Never push the stable tag before `main` and `develop` contain the completed
+Git Flow topology.
+
+### 5. Complete the GitHub Release
+
+The tag push starts `.github/workflows/release.yml`. It tests the CLI, builds
+five platform archives, creates `checksums.txt`, creates the GitHub Release,
+and moves `latest` for a stable tag.
+
+Find the run for the exact tag and wait for it to finish successfully. A run
+normally takes 1-3 minutes:
+
+```sh
+gh run list --workflow release.yml --event push --limit 20 \
+  --json databaseId,headBranch,status,conclusion,url
+gh run watch RUN_ID --exit-status
+```
+
+Do not run `gh release edit` until the release object exists. Then apply the
+curated notes during the same release session:
+
+```sh
+gh release view vX.Y.Z --repo gBearBest/Bear.CTXPM \
+  --json tagName,isDraft,isPrerelease,assets,url
+gh release edit vX.Y.Z --repo gBearBest/Bear.CTXPM \
+  --notes-file /tmp/bear-ctxpm-release-vX.Y.Z.md
+```
+
+Remove the temporary notes file only after the edit succeeds.
+
+### 6. Verify the published release
+
+```sh
+git fetch --prune origin
+git fetch --tags --force origin
+test "$(git rev-parse vX.Y.Z^{})" = "$(git rev-parse origin/main)"
+git merge-base --is-ancestor vX.Y.Z origin/develop
+test "$(git rev-parse latest^{})" = "$(git rev-parse vX.Y.Z^{})"
+git ls-remote --exit-code --heads origin refs/heads/release/vX.Y.Z
+gh release view vX.Y.Z --repo gBearBest/Bear.CTXPM \
+  --json tagName,isDraft,isPrerelease,assets,url
+```
+
+The remote release-branch lookup should report absence. Also verify that the
+GitHub Release is not a draft or pre-release and contains these six assets:
+
+- `ctxpm_X.Y.Z_darwin_arm64.tar.gz`
+- `ctxpm_X.Y.Z_darwin_amd64.tar.gz`
+- `ctxpm_X.Y.Z_linux_arm64.tar.gz`
+- `ctxpm_X.Y.Z_linux_amd64.tar.gz`
+- `ctxpm_X.Y.Z_windows_amd64.zip`
+- `checksums.txt`
+
+Do not report success merely because the tag exists. Publication is complete
+only after the workflow, notes, assets, `latest`, branch topology, and release
+branch cleanup have all been verified.
+
+## Pre-release candidates
+
+Release candidates remain on an open `release/vX.Y.Z` branch. Start and publish
+that branch with the stable procedure, validate it, and record the current
+`latest` commit before tagging:
+
+```sh
+latest_before=$(git rev-parse latest^{})
+git switch release/vX.Y.Z
+git tag -a vX.Y.Z-rc.N -m "Bear.CTXPM vX.Y.Z-rc.N"
+git push origin refs/tags/vX.Y.Z-rc.N:refs/tags/vX.Y.Z-rc.N
+```
+
+Wait for the exact Actions run, apply curated notes, and verify that the GitHub
+Release is marked as a pre-release. Then verify that `latest` did not move:
 
 ```sh
 git fetch --tags --force origin
-git rev-list -n 1 v0.1.0
-git rev-list -n 1 latest
-git switch main && git tag --merged | grep v0.1.0
-git switch develop && git tag --merged | grep v0.1.0
-gh release view v0.1.0 --json tagName,isDraft,isPrerelease,assets,url
+test "$(git rev-parse latest^{})" = "$latest_before"
+gh release view vX.Y.Z-rc.N --repo gBearBest/Bear.CTXPM \
+  --json tagName,isDraft,isPrerelease,assets,url
 ```
 
-## Pre-release procedure (Git Flow-compatible)
+Do not run `git flow release finish` for an RC. Continue hardening the same
+release branch for later candidates. When the stable release is approved, run
+the normal stable finish with version `vX.Y.Z`; Git Flow creates the separate
+stable tag on `main`.
 
-Use pre-release tags to validate a release branch before the final stable finish. Keep the release branch open while iterating on release candidates.
+## Hotfixes
 
-Example for `v0.2.0-rc.1`:
-
-1. cut the release branch from `develop`:
-
-```sh
-git switch develop
-git pull --ff-only origin develop
-git switch -c release/v0.2.0
-```
-
-2. run release-hardening changes and validation on `release/v0.2.0`
-
-3. create and push the annotated pre-release tag from the release branch:
-
-```sh
-git switch release/v0.2.0
-git tag -a v0.2.0-rc.1 -m "Bear.CTXPM v0.2.0-rc.1"
-git push origin v0.2.0-rc.1
-```
-
-4. verify the resulting GitHub Release is marked as a pre-release
-
-5. continue hardening on the same `release/v0.2.0` branch and create `v0.2.0-rc.2`, `v0.2.0-rc.3`, and so on as needed
-
-6. when the branch is ready for final release, continue with the stable release finish flow:
-   merge `release/v0.2.0` into `main`, tag `v0.2.0` from `main`, then back-merge the same release branch into `develop`
-
-Expected release-workflow behavior:
-
-- GitHub Release is created as a pre-release
-- assets are still built and uploaded
-- `latest` must not move
-
-Do not tag release candidates from `main`.
-
-## Hotfix procedure (Git Flow)
-
-For urgent production fixes:
-
-1. branch from `main`: `hotfix/vX.Y.Z`
-2. apply only the urgent fix plus any necessary release-hardening updates
-3. run the same validation commands used for stable releases
-4. push the hotfix branch
-5. create and push the annotated stable tag on the hotfix branch
-6. merge the tagged hotfix branch into `main`
-7. merge the same hotfix branch back into `develop`
-8. delete the hotfix branch after both merges complete
-
-Example:
+Hotfixes use the same validation, notes, atomic publication, Actions, and final
+verification requirements as stable releases, but start from `main`:
 
 ```sh
 git switch main
 git pull --ff-only origin main
-git switch -c hotfix/v0.1.1
+git flow hotfix start vX.Y.Z
 
-# apply fix, then validate
-(cd cli && make test)
-(cd cli && make build)
+# Apply and commit the focused production fix, then validate.
 
-git push -u origin hotfix/v0.1.1
-
-git tag -a v0.1.1 -m "Bear.CTXPM v0.1.1"
-git push origin v0.1.1
-
-git switch main
-git pull --ff-only origin main
-git merge --no-ff hotfix/v0.1.1 -m "Merge hotfix/v0.1.1 into main"
-git push origin main
-
-git switch develop
-git pull --ff-only origin develop
-git merge --no-ff hotfix/v0.1.1 -m "Merge hotfix/v0.1.1 back into develop"
-git push origin develop
-
-git branch -d hotfix/v0.1.1
-git push origin --delete hotfix/v0.1.1
+git flow hotfix publish vX.Y.Z
+git flow hotfix finish --fetch --nopush --keepremote \
+  -m "Bear.CTXPM vX.Y.Z" vX.Y.Z
 ```
 
-## Right and wrong examples
+Verify that the stable tag points to `main` and is an ancestor of `develop`,
+then atomically push `main`, `develop`, and the exact tag. Delete
+`hotfix/vX.Y.Z` remotely only after that push succeeds.
 
-Wrong:
+Do not put unrelated development work into a hotfix.
 
-```sh
-git push origin main
-git tag v0.1.0
-```
+## Protected-branch fallback
 
-Why wrong:
+If branch protection prevents direct pushes, stop before running the local
+finish command and use reviewed merge commits that preserve the same topology:
 
-- lightweight tags are less explicit than the annotated tags used here
-- this skips the required Git Flow release-branch finish sequence (`main` + back-merge to `develop`)
+1. merge a PR from `release/vX.Y.Z` (or `hotfix/vX.Y.Z`) into `main` using a
+   merge commit, never squash or rebase
+2. fetch the resulting `main` and create annotated tag `vX.Y.Z` locally on that
+   exact merge commit; do not push it yet
+3. merge `main` into `develop` using a merge commit
+4. fetch both branches, verify the tag is reachable from each, push the exact
+   tag, and then delete the release or hotfix branch
 
-Right:
+Do not open a second PR from the release or hotfix branch directly into
+`develop`; Git Flow back-merges the production result so the stable merge commit
+and tag remain in the integration history.
 
-```sh
-git switch -c release/v0.1.0 develop
-git push -u origin release/v0.1.0
-git tag -a v0.1.0 -m "Bear.CTXPM v0.1.0"
-git push origin v0.1.0
-git switch main
-git merge --no-ff release/v0.1.0
-git push origin main
-git switch develop
-git merge --no-ff release/v0.1.0
-git push origin develop
-```
+## Failure handling
 
-Wrong:
+- If `finish` reports a merge conflict, inspect the conflicted files. Do not
+  invent a conflict policy. Resolve only when the correct result is clear;
+  otherwise ask the user. Stage the resolution, complete the pending merge with
+  its existing message, and rerun the same `git flow ... finish` command so it
+  can resume its remaining steps.
+- If `finish` partially succeeded, inspect `main`, `develop`, the release or
+  hotfix branch, and the tag before retrying. Git Flow is designed to resume; do
+  not create a replacement tag or repeat merges manually.
+- If the atomic push fails, leave the remote release or hotfix branch intact and
+  inspect remote divergence. Never force-push `main`, `develop`, or a version
+  tag.
+- If Actions fails, do not move tags or create a second release for the same
+  version. Diagnose and fix through the appropriate Git Flow branch, then choose
+  a new version if a published tag would need different content.
+- Release notes are not optional cleanup. Apply and verify them before ending a
+  successful publication session.
 
-```sh
-git switch main
-git merge --no-ff release/v0.1.0
-git push origin main
-git tag -a v0.1.0 -m "Bear.CTXPM v0.1.0" main
-git push origin v0.1.0
-```
+## Prohibited shortcuts
 
-Why wrong:
+Do not:
 
-- tagging on `main` after the merge means the tag is on the merge commit, not on the release branch
-- when the release branch merges back to `develop`, the tag is not visible from `develop`
-
-Wrong:
-
-```sh
-git switch main
-git tag -a v0.2.0-rc.1 -m "Bear.CTXPM v0.2.0-rc.1"
-git push origin v0.2.0-rc.1
-```
-
-Why wrong:
-
-- it makes `main` point at a release candidate instead of the latest stable line
-- it breaks the contract that pre-release tags come from `release/*`
-
-Right:
-
-```sh
-git switch release/v0.2.0
-git tag -a v0.2.0-rc.1 -m "Bear.CTXPM v0.2.0-rc.1"
-git push origin v0.2.0-rc.1
-```
-
-Wrong:
-
-- leaving the auto-generated release notes unchanged
-- documenting the full release procedure in public docs without user approval
-- tagging directly from `develop` for stable release
-
-Right:
-
-- curating the release body after the release is published
-- keeping the reusable procedure in this skill
-- finishing `release/*` into both `main` and `develop`
-
-## Learnings
-
-- `latest` is maintained by the release workflow as the moving stable tag; release operators should verify it after every stable publication.
-- The project owner wants the release workflow preserved as a project-level skill rather than as general version-controlled documentation pages.
-- Git Flow is the canonical release model:
-  stable release: `develop` -> `release/*` -> **tag on `release/*`** -> merge to `main` -> back-merge to `develop`
-  pre-release: `develop` -> `release/*` -> tag `-rc.N` on `release/*` -> finish to `main` only when ready for stable
-  hotfix: `main` -> `hotfix/*` -> **tag on `hotfix/*`** -> merge to `main` -> back-merge to `develop`
-- Tags must be created on the release/hotfix branch BEFORE merging to main, so that both `main` and `develop` can see the tag after the back-merge completes.
-- **Critical mistake**: tagging `main` after merging creates the tag on the merge commit, making it invisible to `develop` after back-merge. Always tag the branch, not the merge result.
-- **Release notes must be applied before the session ends.** v0.1.10, v0.1.11, and v0.1.12 all shipped with only auto-generated notes because this step was skipped. Always write the notes file and run `gh release edit` as part of the same session that publishes the tag — do not defer it.
-- The GitHub Actions workflow takes 1–3 minutes after the tag push before the Release object exists. Wait ~90 seconds and poll with `gh release view` before attempting `gh release edit`; editing a non-existent release fails silently or errors.
+- create the stable tag on `release/*`, `hotfix/*`, or `develop`
+- manually tag `main` before the release or hotfix branch has been merged into
+  it
+- pass `release/vX.Y.Z` or `hotfix/vX.Y.Z` as the Git Flow version argument
+- squash or rebase a release/hotfix merge
+- merge the release or hotfix branch directly back into `develop` after
+  finishing `main`
+- push a stable tag before the completed `main` and `develop` topology
+- force-move a semantic version tag
+- leave auto-generated GitHub release notes uncurated
+- advance `latest` for a pre-release
