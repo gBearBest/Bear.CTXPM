@@ -267,12 +267,13 @@ func runEntrypoint(app *engine.App, args []string) error {
 func runDetect(app *engine.App, args []string) error {
 	fs := flag.NewFlagSet("detect", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
+	agent := fs.String("agent", "", "Current agent profile to check enrollment (e.g. claude-code, kiro, codex)")
 	jsonOutput := fs.Bool("json", false, "Emit JSON output")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	result, err := app.Detect()
+	result, err := app.Detect(engine.DetectOptions{Agent: *agent})
 	if err != nil {
 		return err
 	}

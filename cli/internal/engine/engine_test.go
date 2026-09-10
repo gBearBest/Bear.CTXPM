@@ -998,7 +998,7 @@ func TestDetectFindsUnmanagedCompatibilityResource(t *testing.T) {
 	})
 
 	app := New(root)
-	result, err := app.Detect()
+	result, err := app.Detect(DetectOptions{})
 	if err != nil {
 		t.Fatalf("Detect() error = %v", err)
 	}

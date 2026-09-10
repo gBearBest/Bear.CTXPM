@@ -1173,12 +1173,26 @@ type MigrationCandidate struct {
 	RequiresMigration bool     `json:"requires_migration"`
 }
 
+type DetectOptions struct {
+	Agent string
+}
+
+type AgentEnrollmentStatus struct {
+	Agent           string   `json:"agent"`
+	Enrolled        bool     `json:"enrolled"`
+	EntrypointOK    bool     `json:"entrypoint_ok"`
+	CompatibilityOK bool     `json:"compatibility_ok"`
+	MissingLinks    []string `json:"missing_links,omitempty"`
+	Suggestion      string   `json:"suggestion,omitempty"`
+}
+
 type DetectResult struct {
-	Status       string               `json:"status"`
-	ManifestPath string               `json:"manifest_path"`
-	Candidates   []MigrationCandidate `json:"candidates"`
-	Unresolved   []string             `json:"unresolved_resources,omitempty"`
-	Warnings     []string             `json:"warnings,omitempty"`
+	Status          string                 `json:"status"`
+	ManifestPath    string                 `json:"manifest_path"`
+	Candidates      []MigrationCandidate   `json:"candidates"`
+	Unresolved      []string               `json:"unresolved_resources,omitempty"`
+	Warnings        []string               `json:"warnings,omitempty"`
+	AgentEnrollment *AgentEnrollmentStatus `json:"agent_enrollment,omitempty"`
 }
 
 func (r DetectResult) Text() string {
@@ -1199,13 +1213,76 @@ func (r DetectResult) Text() string {
 			lines = append(lines, "- "+item)
 		}
 	}
+	if r.AgentEnrollment != nil {
+		e := r.AgentEnrollment
+		if !e.Enrolled || !e.EntrypointOK || !e.CompatibilityOK {
+			lines = append(lines, fmt.Sprintf("Agent %q is not fully enrolled; run: %s", e.Agent, e.Suggestion))
+			for _, link := range e.MissingLinks {
+				lines = append(lines, "  missing compatibility link: "+link)
+			}
+		} else {
+			lines = append(lines, fmt.Sprintf("Agent %q: enrolled, entrypoint and compatibility links OK", e.Agent))
+		}
+	}
 	if r.ManifestPath != "" {
 		lines = append(lines, "Manifest: "+r.ManifestPath)
 	}
 	return strings.Join(lines, "\n") + "\n"
 }
 
-func (a *App) Detect() (*DetectResult, error) {
+func checkAgentEnrollment(root, agent string, m *manifest.Manifest) *AgentEnrollmentStatus {
+	enrolled := false
+	for _, a := range m.Agents {
+		if a == agent {
+			enrolled = true
+			break
+		}
+	}
+
+	entrypointOK := false
+	entrypointFile := manifest.EntrypointFile(agent)
+	if entrypointFile != "" {
+		sourceAbs := filepath.Join(root, manifest.CanonicalEntrypointSourceFile())
+		aliasAbs := filepath.Join(root, entrypointFile)
+		relTarget, relErr := filepath.Rel(filepath.Dir(aliasAbs), sourceAbs)
+		if relErr == nil {
+			if current, err := os.Readlink(aliasAbs); err == nil && current == relTarget {
+				entrypointOK = true
+			}
+		}
+	}
+
+	var missingLinks []string
+	for _, dep := range m.Dependencies {
+		for _, compat := range manifest.DerivedCompatibilityPaths([]string{agent}, dep) {
+			if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(compat))); err != nil {
+				missingLinks = append(missingLinks, compat)
+			}
+		}
+	}
+	for _, pkg := range m.Packages {
+		for _, compat := range manifest.DerivedCompatibilityPaths([]string{agent}, pkg) {
+			if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(compat))); err != nil {
+				missingLinks = append(missingLinks, compat)
+			}
+		}
+	}
+	compatOK := len(missingLinks) == 0
+
+	status := &AgentEnrollmentStatus{
+		Agent:           agent,
+		Enrolled:        enrolled,
+		EntrypointOK:    entrypointOK,
+		CompatibilityOK: compatOK,
+		MissingLinks:    missingLinks,
+	}
+	if !enrolled || !entrypointOK || !compatOK {
+		status.Suggestion = fmt.Sprintf("ctxpm init --agent %s", agent)
+	}
+	return status
+}
+
+func (a *App) Detect(opts DetectOptions) (*DetectResult, error) {
 	m, manifestPath, err := manifest.Load(a.Root)
 	if err != nil {
 		return nil, err
@@ -1230,6 +1307,15 @@ func (a *App) Detect() (*DetectResult, error) {
 			result.Status = "blocked"
 		} else {
 			result.Status = "partial"
+		}
+	}
+	if agent := strings.TrimSpace(opts.Agent); agent != "" {
+		enrollment := checkAgentEnrollment(a.Root, agent, m)
+		result.AgentEnrollment = enrollment
+		if !enrollment.Enrolled || !enrollment.EntrypointOK || !enrollment.CompatibilityOK {
+			if result.Status == "clean" {
+				result.Status = "agent_not_enrolled"
+			}
 		}
 	}
 	return result, nil

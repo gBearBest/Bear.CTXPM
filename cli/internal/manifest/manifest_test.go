@@ -13,7 +13,7 @@ func TestManagedEntrypointPreservesBootstrapContract(t *testing.T) {
 		"read the bundled skill",
 		"Read `ctxpm.yaml` first",
 		"`.ctxpm/packages/` before external resources under `.ctxpm/dependencies/`",
-		"run `ctxpm detect` periodically",
+		"At session start, run `ctxpm detect --agent <current-agent>`",
 		"run `ctxpm check-updates` when `update_policy` says the check is enabled and due",
 		"Keep non-actionable results silent.",
 		"Get user confirmation before `ctxpm update` or `ctxpm migrate`",

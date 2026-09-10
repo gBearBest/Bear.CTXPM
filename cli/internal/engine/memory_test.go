@@ -24,7 +24,7 @@ func TestDetectFindsMemoryMigrationCandidate(t *testing.T) {
 		Agents:  []string{"generic"},
 	})
 
-	result, err := New(root).Detect()
+	result, err := New(root).Detect(DetectOptions{})
 	if err != nil {
 		t.Fatalf("Detect() error = %v", err)
 	}
