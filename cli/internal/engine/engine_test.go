@@ -614,6 +614,8 @@ func TestInitCreatesCompatibilitySymlinksForNewAgents(t *testing.T) {
 		{agent: "cursor", entrypoint: "AGENTS.md", compatDir: ".cursor"},
 		{agent: "windsurf", entrypoint: "AGENTS.md", compatDir: ".windsurf"},
 		{agent: "kiro", entrypoint: "AGENTS.md", compatDir: ".kiro"},
+		{agent: "opencode", entrypoint: "AGENTS.md", compatDir: ".opencode"},
+		{agent: "grok", entrypoint: "AGENTS.md", compatDir: ".grok"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.agent, func(t *testing.T) {

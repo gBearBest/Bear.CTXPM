@@ -500,6 +500,8 @@ func TestAgentCompatibilityPrefix(t *testing.T) {
 		{agent: "cursor", want: ".cursor"},
 		{agent: "windsurf", want: ".windsurf"},
 		{agent: "kiro", want: ".kiro"},
+		{agent: "opencode", want: ".opencode"},
+		{agent: "grok", want: ".grok"},
 		{agent: "unknown", want: ""},
 		{agent: "", want: ""},
 	}
@@ -526,6 +528,8 @@ func TestEntrypointFile(t *testing.T) {
 		{agent: "cursor", want: "AGENTS.md"},
 		{agent: "windsurf", want: "AGENTS.md"},
 		{agent: "kiro", want: "AGENTS.md"},
+		{agent: "opencode", want: "AGENTS.md"},
+		{agent: "grok", want: "AGENTS.md"},
 		{agent: "unknown", want: "AGENTS.md"},
 		{agent: "", want: "AGENTS.md"},
 	}
