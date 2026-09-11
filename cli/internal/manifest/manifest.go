@@ -500,9 +500,52 @@ func pathIsFileLike(value string) bool {
 	return strings.Contains(base, ".")
 }
 
+var knownAgents = []string{
+	"generic", "codex", "claude-code", "antigravity", "gemini-cli",
+	"cursor", "windsurf", "kiro", "opencode", "grok",
+}
+
+var knownAgentSet = func() map[string]bool {
+	values := map[string]bool{}
+	for _, agent := range knownAgents {
+		values[agent] = true
+	}
+	return values
+}()
+
+// agentAliases maps commonly mistyped or shortened agent profile names to
+// their canonical form. Exact-match only; not a fuzzy/prefix matcher.
+var agentAliases = map[string]string{
+	"claude": "claude-code",
+	"gemini": "gemini-cli",
+}
+
+// NormalizeAgent resolves case variation and known aliases (e.g. "Claude" or
+// "claude" -> "claude-code") to their canonical profile name. Unrecognized
+// names are returned lowercased but otherwise unchanged.
+func NormalizeAgent(agent string) string {
+	folded := strings.ToLower(strings.TrimSpace(agent))
+	if canonical, ok := agentAliases[folded]; ok {
+		return canonical
+	}
+	return folded
+}
+
+// IsKnownAgent reports whether agent is a recognized profile name after
+// alias normalization.
+func IsKnownAgent(agent string) bool {
+	return knownAgentSet[NormalizeAgent(agent)]
+}
+
+// KnownAgentNames returns the canonical set of recognized agent profile names.
+func KnownAgentNames() []string {
+	return append([]string(nil), knownAgents...)
+}
+
 // agentCompatibilityPrefix returns the discovery directory prefix for a given agent profile.
 // Returns an empty string for unrecognized agents.
 func agentCompatibilityPrefix(agent string) string {
+	agent = NormalizeAgent(agent)
 	switch agent {
 	case "codex", "generic":
 		return ".agents"
@@ -584,6 +627,7 @@ func CanonicalEntrypointSourceFile() string {
 }
 
 func EntrypointFile(agent string) string {
+	agent = NormalizeAgent(agent)
 	switch agent {
 	case "claude-code":
 		return "CLAUDE.md"

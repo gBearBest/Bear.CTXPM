@@ -1184,6 +1184,8 @@ type AgentEnrollmentStatus struct {
 	CompatibilityOK bool     `json:"compatibility_ok"`
 	MissingLinks    []string `json:"missing_links,omitempty"`
 	Suggestion      string   `json:"suggestion,omitempty"`
+	Recognized      bool     `json:"recognized"`
+	Warning         string   `json:"warning,omitempty"`
 }
 
 type DetectResult struct {
@@ -1223,6 +1225,9 @@ func (r DetectResult) Text() string {
 		} else {
 			lines = append(lines, fmt.Sprintf("Agent %q: enrolled, entrypoint and compatibility links OK", e.Agent))
 		}
+		if e.Warning != "" {
+			lines = append(lines, "  warning: "+e.Warning)
+		}
 	}
 	if r.ManifestPath != "" {
 		lines = append(lines, "Manifest: "+r.ManifestPath)
@@ -1231,16 +1236,19 @@ func (r DetectResult) Text() string {
 }
 
 func checkAgentEnrollment(root, agent string, m *manifest.Manifest) *AgentEnrollmentStatus {
+	canonical := manifest.NormalizeAgent(agent)
+	recognized := manifest.IsKnownAgent(agent)
+
 	enrolled := false
 	for _, a := range m.Agents {
-		if a == agent {
+		if manifest.NormalizeAgent(a) == canonical {
 			enrolled = true
 			break
 		}
 	}
 
 	entrypointOK := false
-	entrypointFile := manifest.EntrypointFile(agent)
+	entrypointFile := manifest.EntrypointFile(canonical)
 	if entrypointFile != "" {
 		sourceAbs := filepath.Join(root, manifest.CanonicalEntrypointSourceFile())
 		aliasAbs := filepath.Join(root, entrypointFile)
@@ -1254,14 +1262,14 @@ func checkAgentEnrollment(root, agent string, m *manifest.Manifest) *AgentEnroll
 
 	var missingLinks []string
 	for _, dep := range m.Dependencies {
-		for _, compat := range manifest.DerivedCompatibilityPaths([]string{agent}, dep) {
+		for _, compat := range manifest.DerivedCompatibilityPaths([]string{canonical}, dep) {
 			if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(compat))); err != nil {
 				missingLinks = append(missingLinks, compat)
 			}
 		}
 	}
 	for _, pkg := range m.Packages {
-		for _, compat := range manifest.DerivedCompatibilityPaths([]string{agent}, pkg) {
+		for _, compat := range manifest.DerivedCompatibilityPaths([]string{canonical}, pkg) {
 			if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(compat))); err != nil {
 				missingLinks = append(missingLinks, compat)
 			}
@@ -1275,9 +1283,15 @@ func checkAgentEnrollment(root, agent string, m *manifest.Manifest) *AgentEnroll
 		EntrypointOK:    entrypointOK,
 		CompatibilityOK: compatOK,
 		MissingLinks:    missingLinks,
+		Recognized:      recognized,
+	}
+	if !recognized {
+		status.Warning = fmt.Sprintf("agent profile %q is not recognized; recognized profiles: %s", agent, strings.Join(manifest.KnownAgentNames(), ", "))
+	} else if canonical != agent {
+		status.Warning = fmt.Sprintf("agent profile %q resolved to %q", agent, canonical)
 	}
 	if !enrolled || !entrypointOK || !compatOK {
-		status.Suggestion = fmt.Sprintf("ctxpm init --agent %s", agent)
+		status.Suggestion = fmt.Sprintf("ctxpm init --agent %s", canonical)
 	}
 	return status
 }
