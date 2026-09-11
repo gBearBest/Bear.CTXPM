@@ -518,6 +518,10 @@ func agentCompatibilityPrefix(agent string) string {
 		return ".windsurf"
 	case "kiro":
 		return ".kiro"
+	case "opencode":
+		return ".opencode"
+	case "grok":
+		return ".grok"
 	default:
 		return ""
 	}

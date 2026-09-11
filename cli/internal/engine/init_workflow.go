@@ -278,7 +278,7 @@ func discoverInitResources(root string, projectHints []string) ([]discoveredReso
 
 func discoverCompatibilityResources(root string, projectHints []string) ([]discoveredResource, error) {
 	candidates := []discoveredResource{}
-	for _, relDir := range []string{".agents", ".claude", ".antigravity", ".gemini", ".cursor", ".windsurf", ".kiro"} {
+	for _, relDir := range []string{".agents", ".claude", ".antigravity", ".gemini", ".cursor", ".windsurf", ".kiro", ".opencode", ".grok"} {
 		for _, resourceType := range manifest.SupportedTypes() {
 			discovered, err := discoverTypedResourceDir(root, filepath.ToSlash(filepath.Join(relDir, manifest.TypeDir(resourceType))), resourceType, true, projectHints, true, true)
 			if err != nil {
@@ -582,7 +582,8 @@ func compatibilityIgnoreRules(agents []string, resource manifest.Resource) []str
 		switch {
 		case strings.HasPrefix(compat, ".agents/"), strings.HasPrefix(compat, ".claude/"), strings.HasPrefix(compat, ".antigravity/"),
 			strings.HasPrefix(compat, ".gemini/"), strings.HasPrefix(compat, ".cursor/"),
-			strings.HasPrefix(compat, ".windsurf/"), strings.HasPrefix(compat, ".kiro/"):
+			strings.HasPrefix(compat, ".windsurf/"), strings.HasPrefix(compat, ".kiro/"),
+			strings.HasPrefix(compat, ".opencode/"), strings.HasPrefix(compat, ".grok/"):
 			rules = append(rules, filepath.ToSlash(filepath.Dir(compat))+"/")
 		default:
 			rules = append(rules, compat)
@@ -637,7 +638,9 @@ func ignoredInitPath(rel string) bool {
 		strings.HasPrefix(rel, ".gemini/") ||
 		strings.HasPrefix(rel, ".cursor/") ||
 		strings.HasPrefix(rel, ".windsurf/") ||
-		strings.HasPrefix(rel, ".kiro/")
+		strings.HasPrefix(rel, ".kiro/") ||
+		strings.HasPrefix(rel, ".opencode/") ||
+		strings.HasPrefix(rel, ".grok/")
 }
 
 func compatibilityDiscoveryPath(rel string) bool {
@@ -648,7 +651,9 @@ func compatibilityDiscoveryPath(rel string) bool {
 		strings.HasPrefix(rel, ".gemini/") ||
 		strings.HasPrefix(rel, ".cursor/") ||
 		strings.HasPrefix(rel, ".windsurf/") ||
-		strings.HasPrefix(rel, ".kiro/")
+		strings.HasPrefix(rel, ".kiro/") ||
+		strings.HasPrefix(rel, ".opencode/") ||
+		strings.HasPrefix(rel, ".grok/")
 }
 
 func resourcePathExists(root, resourcePath string) bool {

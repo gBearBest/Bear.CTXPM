@@ -276,6 +276,8 @@ Agent profile to directory prefix:
 | `cursor` | `.cursor/` |
 | `windsurf` | `.windsurf/` |
 | `kiro` | `.kiro/` |
+| `opencode` | `.opencode/` |
+| `grok` | `.grok/` |
 
 Resource type to subdirectory:
 
