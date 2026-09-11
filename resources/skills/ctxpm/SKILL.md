@@ -101,7 +101,7 @@ When the companion CLI is available, prefer it for routine lifecycle operations:
 
 - `ctxpm install`
 - `ctxpm entrypoint doctor`
-- `ctxpm detect`
+- `ctxpm detect --agent <current-agent>`
 - `ctxpm migrate`
 - `ctxpm add`
 - `ctxpm list`
@@ -123,6 +123,8 @@ If the CLI is unavailable, follow the same protocol manually instead of inventin
 Use `ctxpm update ctxpm` to upgrade the complete ctxpm release unit explicitly; `ctxpm update --all` includes it when an update is available. Every `ctxpm install` installs the ctxpm Release locked in `ctxpm.yaml`, restores its complete skill snapshot and managed entrypoint from that Release binary, and keeps its CLI beside the skill without changing a separate global installation.
 
 ## Conversational Maintenance Workflow
+
+At a session start, identify the current agent profile (e.g. `claude-code`, `kiro`, `codex`, `gemini-cli`) and run `ctxpm detect --agent <current-agent>`. If the result status is `agent_not_enrolled`, prompt the user: "ctxpm is not configured for this agent (`<agent>`). Run `ctxpm init --agent <agent>` to enroll it?" Wait for confirmation, then run the suggested command.
 
 Perform routine read-only `ctxpm` checks without narrating them. At a session boundary, if `update_policy` says dependency checks are enabled and due, run the bundled CLI's `check-updates` command first. If updates are available, tell the user and wait for explicit confirmation before running `ctxpm update` or `ctxpm update --all` with the bundled CLI. Use the CLI for the actual resource rewrite and reinstall step; do not hand-edit resource files when the CLI can perform the update.
 

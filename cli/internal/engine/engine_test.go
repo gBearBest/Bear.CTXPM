@@ -584,6 +584,78 @@ func TestInitForceSyncsAgentsAndCompatibility(t *testing.T) {
 	}
 }
 
+func TestDetectAgentEnrollmentResolvesAlias(t *testing.T) {
+	root := t.TempDir()
+	app := New(root)
+	if _, err := app.Init(InitOptions{Agent: "claude-code"}); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+
+	canonicalResult, err := app.Detect(DetectOptions{Agent: "claude-code"})
+	if err != nil {
+		t.Fatalf("Detect() error = %v", err)
+	}
+	canonical := canonicalResult.AgentEnrollment
+	if canonical == nil {
+		t.Fatalf("expected AgentEnrollment to be set")
+	}
+	if canonical.Warning != "" {
+		t.Fatalf("canonical enrollment Warning = %q, want empty", canonical.Warning)
+	}
+
+	variants := []string{"claude", "Claude", "CLAUDE-CODE", "Claude-Code"}
+	for _, variant := range variants {
+		t.Run(variant, func(t *testing.T) {
+			result, err := app.Detect(DetectOptions{Agent: variant})
+			if err != nil {
+				t.Fatalf("Detect() error = %v", err)
+			}
+			got := result.AgentEnrollment
+			if got == nil {
+				t.Fatalf("expected AgentEnrollment to be set")
+			}
+			if !got.Enrolled || !got.EntrypointOK || !got.CompatibilityOK {
+				t.Fatalf("enrollment for %q = %+v, want fully enrolled like canonical %+v", variant, got, canonical)
+			}
+			if got.Enrolled != canonical.Enrolled || got.EntrypointOK != canonical.EntrypointOK || got.CompatibilityOK != canonical.CompatibilityOK {
+				t.Fatalf("enrollment for %q = %+v, does not match canonical enrollment %+v", variant, got, canonical)
+			}
+			if !got.Recognized {
+				t.Fatalf("Recognized = false for %q, want true", variant)
+			}
+			if got.Warning == "" {
+				t.Fatalf("expected enrollment for %q to carry a resolution warning", variant)
+			}
+		})
+	}
+}
+
+func TestDetectAgentEnrollmentWarnsOnUnknownAgent(t *testing.T) {
+	root := t.TempDir()
+	app := New(root)
+	if _, err := app.Init(InitOptions{Agent: "generic"}); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+
+	result, err := app.Detect(DetectOptions{Agent: "bogus"})
+	if err != nil {
+		t.Fatalf("Detect() error = %v", err)
+	}
+	enrollment := result.AgentEnrollment
+	if enrollment == nil {
+		t.Fatalf("expected AgentEnrollment to be set")
+	}
+	if enrollment.Recognized {
+		t.Fatalf("Recognized = true, want false for unknown agent")
+	}
+	if enrollment.Warning == "" {
+		t.Fatalf("expected a warning for unrecognized agent")
+	}
+	if !strings.Contains(enrollment.Warning, "claude-code") {
+		t.Fatalf("Warning = %q, want it to list known profiles", enrollment.Warning)
+	}
+}
+
 func TestInitDetectsGeminiEntrypointWhenAgentOmitted(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "GEMINI.md"), []byte("gemini config\n"), 0o644); err != nil {
@@ -614,6 +686,8 @@ func TestInitCreatesCompatibilitySymlinksForNewAgents(t *testing.T) {
 		{agent: "cursor", entrypoint: "AGENTS.md", compatDir: ".cursor"},
 		{agent: "windsurf", entrypoint: "AGENTS.md", compatDir: ".windsurf"},
 		{agent: "kiro", entrypoint: "AGENTS.md", compatDir: ".kiro"},
+		{agent: "opencode", entrypoint: "AGENTS.md", compatDir: ".opencode"},
+		{agent: "grok", entrypoint: "AGENTS.md", compatDir: ".grok"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.agent, func(t *testing.T) {
@@ -998,7 +1072,7 @@ func TestDetectFindsUnmanagedCompatibilityResource(t *testing.T) {
 	})
 
 	app := New(root)
-	result, err := app.Detect()
+	result, err := app.Detect(DetectOptions{})
 	if err != nil {
 		t.Fatalf("Detect() error = %v", err)
 	}

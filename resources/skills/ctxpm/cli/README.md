@@ -34,7 +34,7 @@ ctxpm init [--agent <profile>] [--project-name <name>] [--force] [--dry-run]
 
 | Flag | Description |
 |---|---|
-| `--agent` | Primary agent profile (e.g. `codex`, `claude`, `gemini`, `cursor`, `kiro`). Defaults to auto-detected agent or `generic`. |
+| `--agent` | Primary agent profile (e.g. `codex`, `claude-code`, `gemini-cli`, `cursor`, `kiro`, `opencode`, `grok`). Defaults to auto-detected agent or `generic`. |
 | `--project-name` | Override the project name written into `ctxpm.yaml`. |
 | `--force` | Overwrite missing managed files when a manifest already exists. |
 | `--dry-run` | Report changes without writing files. |

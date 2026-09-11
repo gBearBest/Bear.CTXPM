@@ -42,6 +42,8 @@ Prioritize the following profiles:
 - `cursor`
 - `windsurf`
 - `kiro`
+- `opencode`
+- `grok`
 - `generic`
 
 If the user does not clearly specify one:
@@ -68,6 +70,8 @@ The mapping between agents and default root entrypoint filenames is:
 | `cursor` | `AGENTS.md` |
 | `windsurf` | `AGENTS.md` |
 | `kiro` | `AGENTS.md` |
+| `opencode` | `AGENTS.md` |
+| `grok` | `AGENTS.md` |
 | `generic` | `AGENTS.md` |
 
 In the shared-entrypoint model, `.ctxpm/AGENTS.md` is the canonical managed source file. All root-level entrypoint filenames (`AGENTS.md`, `CLAUDE.md`, `ANTIGRAVITY.md`, `GEMINI.md`) are compatibility symlinks that point directly to `.ctxpm/AGENTS.md` and should be kept out of version control via `.gitignore`.

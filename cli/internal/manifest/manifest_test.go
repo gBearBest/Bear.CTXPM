@@ -13,7 +13,7 @@ func TestManagedEntrypointPreservesBootstrapContract(t *testing.T) {
 		"read the bundled skill",
 		"Read `ctxpm.yaml` first",
 		"`.ctxpm/packages/` before external resources under `.ctxpm/dependencies/`",
-		"run `ctxpm detect` periodically",
+		"At session start, run `ctxpm detect --agent <current-agent>`",
 		"run `ctxpm check-updates` when `update_policy` says the check is enabled and due",
 		"Keep non-actionable results silent.",
 		"Get user confirmation before `ctxpm update` or `ctxpm migrate`",
@@ -500,6 +500,12 @@ func TestAgentCompatibilityPrefix(t *testing.T) {
 		{agent: "cursor", want: ".cursor"},
 		{agent: "windsurf", want: ".windsurf"},
 		{agent: "kiro", want: ".kiro"},
+		{agent: "opencode", want: ".opencode"},
+		{agent: "grok", want: ".grok"},
+		{agent: "claude", want: ".claude"},
+		{agent: "gemini", want: ".gemini"},
+		{agent: "Claude-Code", want: ".claude"},
+		{agent: "GEMINI", want: ".gemini"},
 		{agent: "unknown", want: ""},
 		{agent: "", want: ""},
 	}
@@ -526,6 +532,12 @@ func TestEntrypointFile(t *testing.T) {
 		{agent: "cursor", want: "AGENTS.md"},
 		{agent: "windsurf", want: "AGENTS.md"},
 		{agent: "kiro", want: "AGENTS.md"},
+		{agent: "opencode", want: "AGENTS.md"},
+		{agent: "grok", want: "AGENTS.md"},
+		{agent: "claude", want: "CLAUDE.md"},
+		{agent: "gemini", want: "GEMINI.md"},
+		{agent: "CLAUDE", want: "CLAUDE.md"},
+		{agent: "Gemini-Cli", want: "GEMINI.md"},
 		{agent: "unknown", want: "AGENTS.md"},
 		{agent: "", want: "AGENTS.md"},
 	}
@@ -534,6 +546,67 @@ func TestEntrypointFile(t *testing.T) {
 			got := EntrypointFile(tt.agent)
 			if got != tt.want {
 				t.Errorf("EntrypointFile(%q) = %q, want %q", tt.agent, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeAgent(t *testing.T) {
+	tests := []struct {
+		agent string
+		want  string
+	}{
+		{agent: "claude", want: "claude-code"},
+		{agent: "gemini", want: "gemini-cli"},
+		{agent: "claude-code", want: "claude-code"},
+		{agent: "codex", want: "codex"},
+		{agent: "unknown", want: "unknown"},
+		{agent: "", want: ""},
+		{agent: "Claude", want: "claude-code"},
+		{agent: "CLAUDE", want: "claude-code"},
+		{agent: "CLAUDE-CODE", want: "claude-code"},
+		{agent: "Claude-Code", want: "claude-code"},
+		{agent: "Gemini-CLI", want: "gemini-cli"},
+		{agent: "  claude  ", want: "claude-code"},
+		{agent: "Unknown", want: "unknown"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.agent, func(t *testing.T) {
+			got := NormalizeAgent(tt.agent)
+			if got != tt.want {
+				t.Errorf("NormalizeAgent(%q) = %q, want %q", tt.agent, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsKnownAgent(t *testing.T) {
+	tests := []struct {
+		agent string
+		want  bool
+	}{
+		{agent: "generic", want: true},
+		{agent: "codex", want: true},
+		{agent: "claude-code", want: true},
+		{agent: "antigravity", want: true},
+		{agent: "gemini-cli", want: true},
+		{agent: "cursor", want: true},
+		{agent: "windsurf", want: true},
+		{agent: "kiro", want: true},
+		{agent: "opencode", want: true},
+		{agent: "grok", want: true},
+		{agent: "claude", want: true},
+		{agent: "gemini", want: true},
+		{agent: "Claude", want: true},
+		{agent: "CLAUDE-CODE", want: true},
+		{agent: "unknown", want: false},
+		{agent: "", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.agent, func(t *testing.T) {
+			got := IsKnownAgent(tt.agent)
+			if got != tt.want {
+				t.Errorf("IsKnownAgent(%q) = %v, want %v", tt.agent, got, tt.want)
 			}
 		})
 	}
