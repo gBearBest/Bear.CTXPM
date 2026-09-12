@@ -49,6 +49,7 @@ type InitOptions struct {
 	CurrentVersion string
 	Force          bool
 	DryRun         bool
+	Progress       func(ProgressEvent)
 }
 
 type InitResult struct {
@@ -239,10 +240,13 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 	ctxpmYAMLStatus := "planned"
 	localCLIStatus := ""
 	if !opts.DryRun {
+		emitProgress(opts.Progress, ProgressEvent{Phase: ProgressStart, Kind: "release", Name: "ctxpm"})
 		bundled, err := ensureBundledCtxpm(a.Root, m.Agents, currentCtxpmVersion)
 		if err != nil {
+			emitProgress(opts.Progress, ProgressEvent{Phase: ProgressDone, Kind: "release", Name: "ctxpm", Status: "failed", Err: err})
 			return nil, err
 		}
+		emitProgress(opts.Progress, ProgressEvent{Phase: ProgressDone, Kind: "release", Name: "ctxpm", Status: bundled.Status, Version: currentCtxpmVersion})
 		ctxpmResource = bundled.Resource
 		upsertManagedDependency(&m.Dependencies, ctxpmResource)
 		files = append(files, bundled.Files...)
@@ -311,6 +315,7 @@ type AddOptions struct {
 	Entry      string
 	Files      []string
 	DryRun     bool
+	Progress   func(ProgressEvent)
 }
 
 type AddResult struct {
@@ -351,16 +356,20 @@ func (a *App) Add(ctx context.Context, opts AddOptions) (*AddResult, error) {
 	}
 
 	if !opts.DryRun {
+		emitProgress(opts.Progress, ProgressEvent{Phase: ProgressStart, Kind: "dependency", Name: detected.Name})
 		installed, err := a.installResource(ctx, m.Agents, &detected.Resource, "")
 		if err != nil {
+			emitProgress(opts.Progress, ProgressEvent{Phase: ProgressDone, Kind: "dependency", Name: detected.Name, Status: "failed", Err: err})
 			return nil, err
 		}
 		if installed.Version != "" {
 			detected.Resource.Version = installed.Version
 		}
 		if _, err := manifest.AddDependency(a.Root, detected.Resource); err != nil {
+			emitProgress(opts.Progress, ProgressEvent{Phase: ProgressDone, Kind: "dependency", Name: detected.Name, Status: "failed", Err: err})
 			return nil, err
 		}
+		emitProgress(opts.Progress, ProgressEvent{Phase: ProgressDone, Kind: "dependency", Name: detected.Name, Status: "added", Version: detected.Resource.Version})
 	} else {
 		version, err := a.resolveLatestVersion(ctx, detected.Resource)
 		if err == nil {
@@ -515,6 +524,29 @@ type InstallOptions struct {
 	CurrentVersion      string
 	BundledCtxpmRelease bool
 	SkipCtxpmRelease    bool
+	Progress            func(ProgressEvent)
+}
+
+type ProgressPhase string
+
+const (
+	ProgressStart ProgressPhase = "start"
+	ProgressDone  ProgressPhase = "done"
+)
+
+type ProgressEvent struct {
+	Phase   ProgressPhase
+	Kind    string
+	Name    string
+	Version string
+	Status  string
+	Err     error
+}
+
+func emitProgress(fn func(ProgressEvent), ev ProgressEvent) {
+	if fn != nil {
+		fn(ev)
+	}
 }
 
 type InstallAction struct {
@@ -605,6 +637,7 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 			continue
 		}
 		if dep.Name == "ctxpm" && opts.BundledCtxpmRelease {
+			emitProgress(opts.Progress, ProgressEvent{Phase: ProgressStart, Kind: "release", Name: dep.Name})
 			previousVersion := dep.Version
 			bundleVersion := dep.Version
 			if isCtxpmReleaseVersion(currentCtxpmVersion) {
@@ -612,6 +645,7 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 			}
 			bundled, err := ensureBundledCtxpm(a.Root, m.Agents, bundleVersion)
 			if err != nil {
+				emitProgress(opts.Progress, ProgressEvent{Phase: ProgressDone, Kind: "release", Name: dep.Name, Status: "failed", Err: err})
 				return nil, err
 			}
 			if bundled.Resource.Version != "" {
@@ -621,6 +655,7 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 				versionUpdates[dep.Name] = dep.Version
 			}
 			actions = append(actions, InstallAction{Kind: "release", Name: dep.Name, Status: "installed_bundled", Version: dep.Version})
+			emitProgress(opts.Progress, ProgressEvent{Phase: ProgressDone, Kind: "release", Name: dep.Name, Status: "installed_bundled", Version: dep.Version})
 			if bundled.LocalCLIStatus != "" {
 				actions = append(actions, InstallAction{Kind: "tool", Name: "ctxpm local cli", Status: bundled.LocalCLIStatus})
 			}
@@ -628,19 +663,25 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 			continue
 		}
 		if dep.Name == "ctxpm" && isCtxpmReleaseVersion(dep.Version) {
+			emitProgress(opts.Progress, ProgressEvent{Phase: ProgressStart, Kind: "release", Name: dep.Name})
 			ctxpmReleaseTarget = canonicalCtxpmReleaseVersion(dep.Version)
 			installedResources = append(installedResources, *dep)
+			emitProgress(opts.Progress, ProgressEvent{Phase: ProgressDone, Kind: "release", Name: dep.Name, Status: "release_pending", Version: dep.Version})
 			continue
 		}
 		if dep.Source == nil {
+			emitProgress(opts.Progress, ProgressEvent{Phase: ProgressStart, Kind: "dependency", Name: dep.Name})
 			if err := ensureResourcePresence(a.Root, *dep, "dependency"); err != nil {
+				emitProgress(opts.Progress, ProgressEvent{Phase: ProgressDone, Kind: "dependency", Name: dep.Name, Status: "failed", Err: err})
 				return nil, err
 			}
 			if err := ensureCompatibility(a.Root, m.Agents, *dep); err != nil {
+				emitProgress(opts.Progress, ProgressEvent{Phase: ProgressDone, Kind: "dependency", Name: dep.Name, Status: "failed", Err: err})
 				return nil, err
 			}
 			actions = append(actions, InstallAction{Kind: "dependency", Name: dep.Name, Status: "linked", Version: dep.Version})
 			installedResources = append(installedResources, *dep)
+			emitProgress(opts.Progress, ProgressEvent{Phase: ProgressDone, Kind: "dependency", Name: dep.Name, Status: "linked", Version: dep.Version})
 			if dep.Name == "ctxpm" {
 				cliPath := filepath.Join(a.Root, ".ctxpm/dependencies/skills/ctxpm/cli/ctxpm")
 				status, _ := prepareBundledCLI(ctx, cliPath, a.Root)
@@ -648,8 +689,10 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 			}
 			continue
 		}
+		emitProgress(opts.Progress, ProgressEvent{Phase: ProgressStart, Kind: "dependency", Name: dep.Name})
 		installed, err := a.installResource(ctx, m.Agents, dep, dep.Version)
 		if err != nil {
+			emitProgress(opts.Progress, ProgressEvent{Phase: ProgressDone, Kind: "dependency", Name: dep.Name, Status: "failed", Err: err})
 			return nil, err
 		}
 		previousVersion := dep.Version
@@ -659,6 +702,7 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 		}
 		actions = append(actions, InstallAction{Kind: "dependency", Name: dep.Name, Status: installed.Status, Version: dep.Version})
 		installedResources = append(installedResources, *dep)
+		emitProgress(opts.Progress, ProgressEvent{Phase: ProgressDone, Kind: "dependency", Name: dep.Name, Status: installed.Status, Version: dep.Version})
 		if dep.Name == "ctxpm" {
 			cliPath := filepath.Join(a.Root, ".ctxpm/dependencies/skills/ctxpm/cli/ctxpm")
 			status, _ := prepareBundledCLI(ctx, cliPath, a.Root)
@@ -677,14 +721,18 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 			actions = append(actions, InstallAction{Kind: "package", Name: pkg.Name, Status: "would_link"})
 			continue
 		}
+		emitProgress(opts.Progress, ProgressEvent{Phase: ProgressStart, Kind: "package", Name: pkg.Name})
 		if err := ensureResourcePresence(a.Root, *pkg, "package"); err != nil {
+			emitProgress(opts.Progress, ProgressEvent{Phase: ProgressDone, Kind: "package", Name: pkg.Name, Status: "failed", Err: err})
 			return nil, err
 		}
 		if err := ensureCompatibility(a.Root, m.Agents, *pkg); err != nil {
+			emitProgress(opts.Progress, ProgressEvent{Phase: ProgressDone, Kind: "package", Name: pkg.Name, Status: "failed", Err: err})
 			return nil, err
 		}
 		actions = append(actions, InstallAction{Kind: "package", Name: pkg.Name, Status: "linked"})
 		installedResources = append(installedResources, *pkg)
+		emitProgress(opts.Progress, ProgressEvent{Phase: ProgressDone, Kind: "package", Name: pkg.Name, Status: "linked"})
 	}
 	if !opts.DryRun && manifestChanged {
 		if _, err := manifest.Save(a.Root, m); err != nil {
@@ -744,6 +792,7 @@ func shouldSyncEntrypointFromActiveCLI(m *manifest.Manifest, currentVersion stri
 type CheckUpdatesOptions struct {
 	Force          bool
 	CurrentVersion string
+	Progress       func(ProgressEvent)
 }
 
 type DependencyUpdate struct {
@@ -840,8 +889,10 @@ func (a *App) CheckUpdates(ctx context.Context, opts CheckUpdatesOptions) (*Chec
 			}
 			continue
 		}
+		emitProgress(opts.Progress, ProgressEvent{Phase: ProgressStart, Kind: "dependency", Name: dep.Name})
 		version, err := a.resolveLatestVersion(ctx, dep)
 		if err != nil {
+			emitProgress(opts.Progress, ProgressEvent{Phase: ProgressDone, Kind: "dependency", Name: dep.Name, Status: "unresolved", Err: err})
 			results = append(results, DependencyUpdate{
 				Name:           dep.Name,
 				Type:           dep.Type,
@@ -858,6 +909,7 @@ func (a *App) CheckUpdates(ctx context.Context, opts CheckUpdatesOptions) (*Chec
 		if dep.Version != version {
 			status = "update_available"
 		}
+		emitProgress(opts.Progress, ProgressEvent{Phase: ProgressDone, Kind: "dependency", Name: dep.Name, Status: status, Version: version})
 		results = append(results, DependencyUpdate{
 			Name:           dep.Name,
 			Type:           dep.Type,
@@ -950,6 +1002,7 @@ type UpdateOptions struct {
 	All            bool
 	CurrentVersion string
 	DryRun         bool
+	Progress       func(ProgressEvent)
 }
 
 type UpdateAction struct {
@@ -1049,8 +1102,10 @@ func (a *App) Update(ctx context.Context, opts UpdateOptions) (*UpdateResult, er
 				})
 				continue
 			}
+			emitProgress(opts.Progress, ProgressEvent{Phase: ProgressStart, Kind: "dependency", Name: dep.Name})
 			installed, err := a.installResource(ctx, m.Agents, dep, updateInfo.LatestVersion)
 			if err != nil {
+				emitProgress(opts.Progress, ProgressEvent{Phase: ProgressDone, Kind: "dependency", Name: dep.Name, Status: "failed", Err: err})
 				return nil, err
 			}
 			current := dep.Version
@@ -1064,6 +1119,7 @@ func (a *App) Update(ctx context.Context, opts UpdateOptions) (*UpdateResult, er
 				CurrentVersion: current,
 				LatestVersion:  dep.Version,
 			})
+			emitProgress(opts.Progress, ProgressEvent{Phase: ProgressDone, Kind: "dependency", Name: dep.Name, Status: "updated", Version: dep.Version})
 		default:
 			result.Skipped = append(result.Skipped, UpdateAction{Name: dep.Name, Status: updateInfo.Status, Reason: updateInfo.Reason})
 		}
@@ -1096,11 +1152,14 @@ func (a *App) Update(ctx context.Context, opts UpdateOptions) (*UpdateResult, er
 				result.Applied = append(result.Applied, UpdateAction{Name: "ctxpm", Kind: "release", Status: "would_update", CurrentVersion: updateInfo.CurrentVersion, LatestVersion: updateInfo.LatestVersion})
 				break
 			}
+			emitProgress(opts.Progress, ProgressEvent{Phase: ProgressStart, Kind: "release", Name: "ctxpm"})
 			ctxpmResult, err := runCtxpmReleaseUpdate(a, ctx, CtxpmReleaseUpdateOptions{Version: updateInfo.LatestVersion, CurrentVersion: opts.CurrentVersion, Force: true})
 			if err != nil {
+				emitProgress(opts.Progress, ProgressEvent{Phase: ProgressDone, Kind: "release", Name: "ctxpm", Status: "failed", Err: err})
 				return nil, err
 			}
 			result.Applied = append(result.Applied, UpdateAction{Name: "ctxpm", Kind: "release", Status: ctxpmResult.Status, CurrentVersion: ctxpmResult.CurrentVersion, LatestVersion: ctxpmResult.LatestVersion})
+			emitProgress(opts.Progress, ProgressEvent{Phase: ProgressDone, Kind: "release", Name: "ctxpm", Status: ctxpmResult.Status, Version: ctxpmResult.LatestVersion})
 		default:
 			result.Skipped = append(result.Skipped, UpdateAction{Name: "ctxpm", Status: updateInfo.Status, Reason: updateInfo.Reason})
 		}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -114,12 +115,20 @@ func runInit(app *engine.App, args []string) error {
 		return err
 	}
 
+	var progress func(engine.ProgressEvent)
+	if !*dryRun {
+		progress = func(ev engine.ProgressEvent) {
+			writeProgressLine(os.Stderr, ev)
+		}
+	}
+
 	result, err := app.Init(engine.InitOptions{
 		Agent:          *agent,
 		ProjectName:    *projectName,
 		CurrentVersion: cliVersion(),
 		Force:          *force,
 		DryRun:         *dryRun,
+		Progress:       progress,
 	})
 	if err != nil {
 		return err
@@ -164,6 +173,13 @@ func runAdd(app *engine.App, args []string) error {
 		return failf(2, "usage: ctxpm add <source-url> --type <type> [options]")
 	}
 
+	var progress func(engine.ProgressEvent)
+	if !*dryRun {
+		progress = func(ev engine.ProgressEvent) {
+			writeProgressLine(os.Stderr, ev)
+		}
+	}
+
 	result, err := app.Add(context.Background(), engine.AddOptions{
 		SourceURL:  fs.Arg(0),
 		Type:       *resourceType,
@@ -176,6 +192,7 @@ func runAdd(app *engine.App, args []string) error {
 		Entry:      *entry,
 		Files:      append([]string(nil), files...),
 		DryRun:     *dryRun,
+		Progress:   progress,
 	})
 	if err != nil {
 		return err
@@ -229,12 +246,20 @@ func runInstall(app *engine.App, args []string) error {
 		return err
 	}
 
+	var progress func(engine.ProgressEvent)
+	if !*dryRun {
+		progress = func(ev engine.ProgressEvent) {
+			writeProgressLine(os.Stderr, ev)
+		}
+	}
+
 	result, err := app.Install(context.Background(), engine.InstallOptions{
 		Type:                *resourceType,
 		Only:                *only,
 		DryRun:              *dryRun,
 		CurrentVersion:      cliVersion(),
 		BundledCtxpmRelease: os.Getenv(engine.CtxpmReleaseSyncEnv) == "1",
+		Progress:            progress,
 	})
 	if err != nil {
 		return err
@@ -318,6 +343,9 @@ func runCheckUpdates(app *engine.App, args []string) error {
 	result, err := app.CheckUpdates(context.Background(), engine.CheckUpdatesOptions{
 		Force:          *force,
 		CurrentVersion: cliVersion(),
+		Progress: func(ev engine.ProgressEvent) {
+			writeProgressLine(os.Stderr, ev)
+		},
 	})
 	if err != nil {
 		return err
@@ -336,11 +364,19 @@ func runUpdate(app *engine.App, args []string) error {
 		return err
 	}
 
+	var progress func(engine.ProgressEvent)
+	if !*dryRun {
+		progress = func(ev engine.ProgressEvent) {
+			writeProgressLine(os.Stderr, ev)
+		}
+	}
+
 	result, err := app.Update(context.Background(), engine.UpdateOptions{
 		Names:          fs.Args(),
 		All:            *all,
 		CurrentVersion: cliVersion(),
 		DryRun:         *dryRun,
+		Progress:       progress,
 	})
 	if err != nil {
 		return err
@@ -499,6 +535,23 @@ func printMaybeJSON(value any, jsonOutput bool) error {
 	}
 
 	return failf(2, "result does not support text rendering")
+}
+
+func writeProgressLine(w io.Writer, ev engine.ProgressEvent) {
+	switch ev.Phase {
+	case engine.ProgressStart:
+		fmt.Fprintf(w, "installing %s...\n", ev.Name)
+	case engine.ProgressDone:
+		if ev.Err != nil {
+			fmt.Fprintf(w, "✗ %s failed: %v\n", ev.Name, ev.Err)
+			return
+		}
+		if ev.Version != "" {
+			fmt.Fprintf(w, "✓ %s [%s] version=%s\n", ev.Name, ev.Status, ev.Version)
+		} else {
+			fmt.Fprintf(w, "✓ %s [%s]\n", ev.Name, ev.Status)
+		}
+	}
 }
 
 func printHelp(w *os.File) {
