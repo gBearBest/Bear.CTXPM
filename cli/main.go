@@ -62,6 +62,10 @@ func run(args []string) error {
 		printHelp(os.Stdout)
 		return nil
 	}
+	if args[0] == "__self-update-helper" {
+		return engine.RunSelfUpdateHelper(args[1:])
+	}
+	engine.CleanupStaleSelfUpdateHelpers()
 
 	root, err := os.Getwd()
 	if err != nil {
