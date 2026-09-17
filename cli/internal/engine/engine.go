@@ -1691,6 +1691,9 @@ func (a *App) installResource(ctx context.Context, agents []string, resource *ma
 }
 
 func (a *App) resolveLatestVersion(ctx context.Context, resource manifest.Resource) (string, error) {
+	if version, isGitHub, err := resolveGitHubPathVersion(ctx, resource); isGitHub {
+		return version, err
+	}
 	resolved, err := a.resolveResource(ctx, resource, resolveOptions{})
 	if err != nil {
 		return "", err
