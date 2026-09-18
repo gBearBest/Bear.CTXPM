@@ -358,11 +358,25 @@ func (a *App) UpdateCtxpmRelease(ctx context.Context, opts CtxpmReleaseUpdateOpt
 	if err != nil {
 		return nil, fmt.Errorf("failed to download release: %w", err)
 	}
-	defer os.Remove(tmpBinary)
 
 	if err := verifyDownloadedBinary(tmpBinary); err != nil {
+		_ = os.Remove(tmpBinary)
 		return nil, fmt.Errorf("downloaded binary verification failed: %w", err)
 	}
+	if runtime.GOOS == "windows" {
+		if err := scheduleWindowsSelfUpdate(executable, tmpBinary, a.Root, targetVersion); err != nil {
+			_ = os.Remove(tmpBinary)
+			return nil, fmt.Errorf("failed to schedule Windows self-update: %w", err)
+		}
+		return &CtxpmReleaseUpdateResult{
+			Status:         "restart_required",
+			CurrentVersion: currentVersion,
+			LatestVersion:  targetVersion,
+			Downloaded:     true,
+			Message:        fmt.Sprintf("Scheduled the update from %s to %s; it will finish after this process exits", currentVersion, targetVersion),
+		}, nil
+	}
+	defer os.Remove(tmpBinary)
 
 	backupPath, err := replaceCurrentBinary(executable, tmpBinary)
 	if err != nil {
@@ -648,31 +662,6 @@ func verifyDownloadedBinary(path string) error {
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	return cmd.Run()
-}
-
-func replaceCurrentBinary(oldPath, newPath string) (string, error) {
-	info, err := os.Stat(oldPath)
-	if err != nil {
-		return "", err
-	}
-	backupPath := oldPath + ".backup"
-	if err := copyFile(oldPath, backupPath, info.Mode()); err != nil {
-		return "", fmt.Errorf("failed to create backup: %w", err)
-	}
-	if err := copyFile(newPath, oldPath, info.Mode()); err != nil {
-		_ = copyFile(backupPath, oldPath, info.Mode())
-		_ = os.Remove(backupPath)
-		return "", fmt.Errorf("failed to replace binary: %w", err)
-	}
-	return backupPath, nil
-}
-
-func restorePreviousBinary(executable, backupPath string) error {
-	info, err := os.Stat(backupPath)
-	if err != nil {
-		return err
-	}
-	return copyFile(backupPath, executable, info.Mode())
 }
 
 func canonicalCtxpmReleaseVersion(v string) string {

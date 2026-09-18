@@ -2,7 +2,9 @@ package engine
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/gBearBest/Bear.CTXPM/cli/internal/manifest"
@@ -101,6 +103,37 @@ func TestReplaceCurrentBinaryCanBeRolledBack(t *testing.T) {
 	}
 	if got, err := os.ReadFile(current); err != nil || string(got) != "old" {
 		t.Fatalf("current binary after rollback = %q, err=%v", got, err)
+	}
+}
+
+func TestReplaceCurrentBinaryFromRunningProcess(t *testing.T) {
+	if target := os.Getenv("CTXPM_TEST_RUNNING_BINARY"); target != "" {
+		if _, err := replaceCurrentBinary(target, os.Getenv("CTXPM_TEST_NEXT_BINARY")); err != nil {
+			t.Fatalf("replaceCurrentBinary() from running process: %v", err)
+		}
+		return
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows uses the external self-update helper")
+	}
+
+	dir := t.TempDir()
+	running := filepath.Join(dir, "running-ctxpm-test")
+	next := filepath.Join(dir, "next-ctxpm-test")
+	if err := copyFile(os.Args[0], running, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyFile(os.Args[0], next, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command(running, "-test.run=^TestReplaceCurrentBinaryFromRunningProcess$")
+	cmd.Env = append(os.Environ(), "CTXPM_TEST_RUNNING_BINARY="+running, "CTXPM_TEST_NEXT_BINARY="+next)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("running binary self-replacement failed: %v\n%s", err, output)
+	}
+	if _, err := os.Stat(running + ".backup"); err != nil {
+		t.Fatalf("backup after self-replacement: %v", err)
 	}
 }
 

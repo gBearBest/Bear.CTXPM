@@ -54,6 +54,19 @@ func (a *App) resolveResource(ctx context.Context, resource manifest.Resource, o
 }
 
 func (a *App) resolveGitResource(ctx context.Context, resource manifest.Resource, opts resolveOptions) (*resolvedResource, error) {
+	targetVersion := strings.TrimSpace(opts.VersionOverride)
+	if targetVersion == "" && opts.UseRecordedVersion {
+		targetVersion = strings.TrimSpace(resource.Version)
+	}
+	githubVersion := ""
+	isGitHub := false
+	if targetVersion == "" {
+		var err error
+		githubVersion, isGitHub, err = resolveGitHubPathVersion(ctx, resource)
+		if err != nil {
+			return nil, err
+		}
+	}
 	tmpDir, err := os.MkdirTemp("", "ctxpm-git-*")
 	if err != nil {
 		return nil, err
@@ -62,10 +75,6 @@ func (a *App) resolveGitResource(ctx context.Context, resource manifest.Resource
 
 	repoDir := filepath.Join(tmpDir, "repo")
 
-	targetVersion := strings.TrimSpace(opts.VersionOverride)
-	if targetVersion == "" && opts.UseRecordedVersion {
-		targetVersion = strings.TrimSpace(resource.Version)
-	}
 	ref := strings.TrimSpace(resource.Source.Ref)
 
 	var cloneArgs []string
@@ -117,12 +126,15 @@ func (a *App) resolveGitResource(ctx context.Context, resource manifest.Resource
 		cleanup()
 		return nil, err
 	}
-	version, err := runGit(ctx, "-C", repoDir, "log", "-1", "--format=%H", "HEAD", "--", resource.Source.Path)
-	if err != nil {
-		cleanup()
-		return nil, err
+	version := githubVersion
+	if !isGitHub {
+		version, err = runGit(ctx, "-C", repoDir, "log", "-1", "--format=%H", "HEAD", "--", resource.Source.Path)
+		if err != nil {
+			cleanup()
+			return nil, err
+		}
+		version = strings.TrimSpace(version)
 	}
-	version = strings.TrimSpace(version)
 	if version == "" {
 		cleanup()
 		return nil, fmt.Errorf("could not resolve latest git revision for %s", resource.Source.Path)
