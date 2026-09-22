@@ -100,7 +100,7 @@ For multi-file URL or archive resources, compute the version from the full direc
 When the companion CLI is available, prefer it for routine lifecycle operations:
 
 - `ctxpm install`
-- `ctxpm entrypoint doctor`
+- `ctxpm doctor`
 - `ctxpm detect --agent <current-agent>`
 - `ctxpm migrate`
 - `ctxpm add`
@@ -180,7 +180,7 @@ Use `.ctxpm/AGENTS.md` as the canonical managed entrypoint source file. All root
 4. For dependencies, record `source` and `version`.
 5. Repair compatibility exposure paths.
 6. Ensure `.gitignore` includes safe ignore rules for repaired compatibility paths.
-7. Run `ctxpm install` to repair the shared root entrypoint topology from the installed ctxpm Release's embedded template, and inspect drift with `ctxpm entrypoint doctor`.
+7. Run `ctxpm install` to repair the shared root entrypoint topology from the installed ctxpm Release's embedded template, and inspect drift with `ctxpm doctor`.
 
 ### Validate
 

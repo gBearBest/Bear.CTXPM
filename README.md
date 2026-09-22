@@ -117,6 +117,12 @@ When an AI takes over a Bear.CTXPM project, it is recommended to follow this wor
 5. Maintain the managed `ctxpm` block in `.ctxpm/AGENTS.md` and keep any agent-specific root entrypoint symlinks pointing to it.
 6. When an operation cannot be completed safely, report the issue and provide organization suggestions.
 
+## Git Dependency Restoration
+
+`ctxpm.yaml` locks every external dependency to a specific version. `ctxpm install` restores those locked versions and uses ignored local state and Git object caches so unchanged dependencies are not fetched again. It does not discover or select newer upstream resources; use `ctxpm check-updates` and the confirmation-driven `ctxpm update` workflow for that.
+
+`ctxpm init` and `ctxpm install` configure repository-local hooks by default. They run `ctxpm install` after checkout, merge-based pull, rebase, and rebase-based pull. Git does not run hooks during clone, so a fresh clone becomes configured when its first initialization or installation runs. Existing custom hook paths are left unchanged. `ctxpm doctor` reports entrypoint and hook state, while `ctxpm install` repairs hooks. The hooks are non-blocking.
+
 ## Non-goals in v0.1
 
 Bear.CTXPM v0.1 does not require:

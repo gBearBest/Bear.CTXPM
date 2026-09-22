@@ -6,7 +6,7 @@ The CLI binary lives alongside this file at `cli/ctxpm` relative to the skill ro
 
 ## Global notes
 
-- All mutating commands accept `--dry-run` to report planned changes without writing files.
+- Commands that change managed resources accept `--dry-run` to report planned changes without writing files.
 - All commands accept `--json` to emit structured output suitable for parsing.
 - Commands that fetch remote content require network access: `add`, ordinary dependency installation, `check-updates`, and `update`.
 - Commands that only read local state are safe to run at any time: `list`, `validate`, `detect`, `memory search`.
@@ -107,36 +107,35 @@ Safe, read-only. Run after manual edits to `ctxpm.yaml` or after filesystem chan
 
 ## install
 
-Download and install all dependencies declared in `ctxpm.yaml`, then repair compatibility symlinks. For the registered `ctxpm` dependency, install the exact Release tag recorded in the manifest and restore its CLI, complete embedded skill snapshot, and entrypoint template. Idempotent — safe to re-run.
+Install all dependencies declared in `ctxpm.yaml`, then repair compatibility symlinks. Installation uses each dependency's recorded `version` as a lock: it does not check for or select newer upstream content. For the registered `ctxpm` dependency, install the exact Release tag recorded in the manifest and restore its CLI, complete embedded skill snapshot, and entrypoint template.
 
 ```
-ctxpm install [--type <type>] [--only <name>] [--dry-run] [--json]
+ctxpm install [--type <type>] [--only <name>] [--force] [--dry-run] [--json]
 ```
 
 | Flag | Description |
 |---|---|
 | `--type` | Only install resources of this type. |
 | `--only` | Only install or repair a single resource by name. |
+| `--force` | Reinstall dependencies even when their recorded version and local content are current. |
 | `--dry-run` | Report the work without writing files. |
 | `--json` | Emit JSON output. |
 
-Requires network access for git and URL sources and when the locked ctxpm Release differs from the active CLI. Installing a project-locked ctxpm Release updates the project-local CLI without replacing a separate global CLI.
+`install` maintains ignored local state in `.ctxpm/state/installed.json`. An unchanged dependency is not fetched again; missing, changed, or newly locked dependencies are restored individually. Git sources reuse ignored object caches under `.ctxpm/cache/git/`, while URL, archive, and Release dependencies only redownload when that dependency's locked version changes. Requires network access only for resources that need restoring and when the locked ctxpm Release differs from the active CLI. Installing a project-locked ctxpm Release updates the project-local CLI without replacing a separate global CLI.
 
 ---
 
-## entrypoint
+## doctor
 
-Diagnose the shared root entrypoint topology: `.ctxpm/AGENTS.md` as the single source of truth, with root-level entrypoint filenames (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, etc.) as symlinks. Run `ctxpm install` to create or repair this topology and refresh the managed block from the locked ctxpm Release's bundled template.
-
-### entrypoint doctor
-
-Check whether the entrypoint topology is healthy without modifying anything.
+`ctxpm init` and `ctxpm install` enable Git hooks by default when run in a Git working tree. The hooks run `ctxpm install` after a branch checkout, merge-based pull, rebase, or rebase-based pull. They restore the versions locked in the checked-out `ctxpm.yaml`; they never run `ctxpm update`. `ctxpm doctor` reports the managed entrypoint and Git hook state. `ctxpm install` repairs or regenerates the hooks when needed.
 
 ```
-ctxpm entrypoint doctor [--json]
+ctxpm doctor [--json]
 ```
 
-Safe, read-only. Run to diagnose drift before running `ctxpm install`.
+Git deliberately does not run repository hooks during clone, so a fresh clone becomes configured when its first `ctxpm init` or `ctxpm install` runs. ctxpm refuses to replace a different configured hook path or an existing non-ctxpm hook file. The hooks remain non-blocking: an unavailable CLI or failed dependency restore prints a diagnostic but does not fail the Git operation.
+
+The command also checks the managed root entrypoint topology: `.ctxpm/AGENTS.md` is the single source of truth and root-level entrypoint filenames (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, etc.) are symlinks. Safe, read-only. Run to diagnose drift before `ctxpm install`.
 
 ---
 

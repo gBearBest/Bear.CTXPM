@@ -89,7 +89,7 @@ However, when the official companion `ctxpm` CLI is available, install or prepar
 
 - `ctxpm init`
 - `ctxpm install`
-- `ctxpm entrypoint doctor`
+- `ctxpm doctor`
 - `ctxpm detect`
 - `ctxpm migrate`
 - `ctxpm add`
