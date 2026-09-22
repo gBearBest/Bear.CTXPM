@@ -73,25 +73,16 @@ func (a *App) resolveGitResource(ctx context.Context, resource manifest.Resource
 	}
 	cleanup := func() { _ = os.RemoveAll(tmpDir) }
 
-	repoDir := filepath.Join(tmpDir, "repo")
-
-	ref := strings.TrimSpace(resource.Source.Ref)
-
-	var cloneArgs []string
-	switch {
-	case targetVersion != "":
-		// Pinned commit SHA: can't shallow-clone (SHA may not be at HEAD),
-		// but --filter=blob:none skips all file content until checkout.
-		cloneArgs = []string{"clone", "--filter=blob:none", "--no-checkout", "--quiet", resource.Source.URL, repoDir}
-	case ref != "":
-		// Known branch or tag: shallow-clone that ref directly.
-		cloneArgs = []string{"clone", "--depth", "1", "--single-branch", "--filter=blob:none", "--branch", ref, "--no-checkout", "--quiet", resource.Source.URL, repoDir}
-	default:
-		// Default branch, no pinning: fastest path.
-		cloneArgs = []string{"clone", "--depth", "1", "--single-branch", "--filter=blob:none", "--no-checkout", "--quiet", resource.Source.URL, repoDir}
+	cacheRepo, releaseCache, err := a.gitCacheRepository(ctx, resource.Source.URL)
+	if err != nil {
+		cleanup()
+		return nil, err
 	}
-
-	if _, err := runGit(ctx, cloneArgs...); err != nil {
+	defer releaseCache()
+	repoDir := filepath.Join(tmpDir, "repo")
+	// A shared clone reuses the persistent cache's Git objects while leaving
+	// sparse-checkout settings isolated to this resolution.
+	if _, err := runGit(ctx, "clone", "--shared", "--no-checkout", "--quiet", cacheRepo, repoDir); err != nil {
 		cleanup()
 		return nil, err
 	}

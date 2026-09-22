@@ -320,6 +320,25 @@ func TestInitCreatesV2Manifest(t *testing.T) {
 	}
 }
 
+func TestInitEnablesGitHooksByDefault(t *testing.T) {
+	root := t.TempDir()
+	initGitRepoForTest(t, root)
+	result, err := New(root).Init(InitOptions{Agent: "generic", CurrentVersion: "v1.2.3"})
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	if result.GitHooksStatus != "enabled" {
+		t.Fatalf("GitHooksStatus = %q, want enabled", result.GitHooksStatus)
+	}
+	status, err := New(root).HooksStatus(context.Background())
+	if err != nil {
+		t.Fatalf("HooksStatus() error = %v", err)
+	}
+	if !status.Enabled {
+		t.Fatalf("hooks status = %+v, want enabled", status)
+	}
+}
+
 func TestInitUpdatesGitignoreForExistingCompatibilityPaths(t *testing.T) {
 	root := t.TempDir()
 	packagePath := ".ctxpm/packages/rules/project-review.md"
@@ -1273,6 +1292,260 @@ func TestInstallCopiesMultiFileURLDependencyAndUpdatesVersion(t *testing.T) {
 	}
 	if !strings.HasPrefix(loaded.Dependencies[0].Version, manifest.VersionPrefixSHA256Tree) {
 		t.Fatalf("manifest version = %q", loaded.Dependencies[0].Version)
+	}
+}
+
+func TestInstallSkipsCurrentDependencyAndRepairsModifiedContent(t *testing.T) {
+	root := t.TempDir()
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		_, _ = w.Write([]byte("# reviewer\n"))
+	}))
+	defer server.Close()
+
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version: manifest.CurrentManifestVersion,
+		Project: manifest.Project{Name: "sample"},
+		Agents:  []string{"generic"},
+		Dependencies: []manifest.Resource{{
+			Name: "reviewer", Type: "rule", Layout: manifest.LayoutFile,
+			Path: ".ctxpm/dependencies/rules/reviewer.md", Entry: "reviewer.md",
+			Source: &manifest.Source{Type: "url", URL: server.URL, Entry: "reviewer.md"},
+		}},
+	})
+
+	app := New(root)
+	if _, err := app.Install(context.Background(), InstallOptions{}); err != nil {
+		t.Fatalf("first Install() error = %v", err)
+	}
+	if requests != 1 {
+		t.Fatalf("requests after first install = %d, want 1", requests)
+	}
+	second, err := app.Install(context.Background(), InstallOptions{})
+	if err != nil {
+		t.Fatalf("second Install() error = %v", err)
+	}
+	if requests != 1 {
+		t.Fatalf("current dependency fetched again: requests = %d", requests)
+	}
+	if len(second.Actions) != 1 || second.Actions[0].Status != "cached" {
+		t.Fatalf("second actions = %+v, want cached dependency", second.Actions)
+	}
+
+	installed := filepath.Join(root, ".ctxpm", "dependencies", "rules", "reviewer.md")
+	if err := os.WriteFile(installed, []byte("changed locally\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if _, err := app.Install(context.Background(), InstallOptions{}); err != nil {
+		t.Fatalf("repair Install() error = %v", err)
+	}
+	if requests != 2 {
+		t.Fatalf("requests after local modification = %d, want 2", requests)
+	}
+	if got := readFileForTest(t, installed); got != "# reviewer\n" {
+		t.Fatalf("repaired content = %q", got)
+	}
+}
+
+func TestUpdateDoesNotReinstallTheDependencyItJustUpdated(t *testing.T) {
+	root := t.TempDir()
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		_, _ = w.Write([]byte("# current\n"))
+	}))
+	defer server.Close()
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version: manifest.CurrentManifestVersion,
+		Project: manifest.Project{Name: "sample"},
+		Dependencies: []manifest.Resource{{
+			Name: "reviewer", Type: "rule", Layout: manifest.LayoutFile,
+			Path: ".ctxpm/dependencies/rules/reviewer.md", Entry: "reviewer.md",
+			Source:  &manifest.Source{Type: "url", URL: server.URL, Entry: "reviewer.md"},
+			Version: "sha256:stale",
+		}},
+	})
+	if _, err := New(root).Update(context.Background(), UpdateOptions{Names: []string{"reviewer"}}); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if requests != 2 {
+		t.Fatalf("requests = %d, want one update check and one dependency restore", requests)
+	}
+}
+
+func TestInstallUsesPersistentGitCacheForUpdatedDependency(t *testing.T) {
+	upstream := t.TempDir()
+	initGitRepoForTest(t, upstream)
+	resourcePath := filepath.Join(upstream, "skills", "reviewer", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(resourcePath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(resourcePath, []byte("# v1\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if _, err := runGit(context.Background(), "-C", upstream, "add", "."); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if _, err := runGit(context.Background(), "-C", upstream, "commit", "-m", "v1"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+	v1, err := runGit(context.Background(), "-C", upstream, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatalf("git rev-parse: %v", err)
+	}
+
+	root := t.TempDir()
+	dep := manifest.Resource{
+		Name: "reviewer", Type: "skill", Layout: manifest.LayoutDir,
+		Path: ".ctxpm/dependencies/skills/reviewer", Entry: "SKILL.md",
+		Source:  &manifest.Source{Type: "git", URL: upstream, Path: "skills/reviewer", Entry: "SKILL.md"},
+		Version: strings.TrimSpace(v1),
+	}
+	writeManifestForTest(t, root, &manifest.Manifest{Version: manifest.CurrentManifestVersion, Project: manifest.Project{Name: "sample"}, Dependencies: []manifest.Resource{dep}})
+	app := New(root)
+	if _, err := app.Install(context.Background(), InstallOptions{}); err != nil {
+		t.Fatalf("first Install() error = %v", err)
+	}
+	if err := os.WriteFile(resourcePath, []byte("# v2\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if _, err := runGit(context.Background(), "-C", upstream, "add", "."); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if _, err := runGit(context.Background(), "-C", upstream, "commit", "-m", "v2"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+	v2, err := runGit(context.Background(), "-C", upstream, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatalf("git rev-parse: %v", err)
+	}
+	dep.Version = strings.TrimSpace(v2)
+	writeManifestForTest(t, root, &manifest.Manifest{Version: manifest.CurrentManifestVersion, Project: manifest.Project{Name: "sample"}, Dependencies: []manifest.Resource{dep}})
+	if _, err := app.Install(context.Background(), InstallOptions{}); err != nil {
+		t.Fatalf("updated Install() error = %v", err)
+	}
+	if got := readFileForTest(t, filepath.Join(root, ".ctxpm", "dependencies", "skills", "reviewer", "SKILL.md")); got != "# v2\n" {
+		t.Fatalf("installed content = %q", got)
+	}
+	if entries, err := os.ReadDir(filepath.Join(root, ".ctxpm", "cache", "git")); err != nil || len(entries) != 1 {
+		t.Fatalf("git cache entries = %d, err = %v; want one", len(entries), err)
+	}
+}
+
+func TestHooksEnableAndStatus(t *testing.T) {
+	root := t.TempDir()
+	initGitRepoForTest(t, root)
+	app := New(root)
+	enabled, err := app.EnableHooks(context.Background())
+	if err != nil {
+		t.Fatalf("EnableHooks() error = %v", err)
+	}
+	if !enabled.Enabled || enabled.Path != hooksPath || len(enabled.Hooks) != len(managedHookFiles()) {
+		t.Fatalf("enabled hooks = %+v", enabled)
+	}
+	for name := range managedHookFiles() {
+		info, err := os.Stat(filepath.Join(root, hooksPath, name))
+		if err != nil || info.Mode()&0o111 == 0 {
+			t.Fatalf("hook %s is not executable: %v", name, err)
+		}
+	}
+}
+
+func TestInstallEnablesGitHooksByDefault(t *testing.T) {
+	root := t.TempDir()
+	initGitRepoForTest(t, root)
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version:      manifest.CurrentManifestVersion,
+		Project:      manifest.Project{Name: "sample"},
+		Agents:       []string{"generic"},
+		Dependencies: []manifest.Resource{},
+		Packages:     []manifest.Resource{},
+	})
+	result, err := New(root).Install(context.Background(), InstallOptions{})
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	status, err := New(root).HooksStatus(context.Background())
+	if err != nil {
+		t.Fatalf("HooksStatus() error = %v", err)
+	}
+	if !status.Enabled {
+		t.Fatalf("hooks status = %+v, want enabled", status)
+	}
+	found := false
+	for _, action := range result.Actions {
+		if action.Kind == "hook" && action.Status == "enabled" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("install actions = %+v, want enabled hook action", result.Actions)
+	}
+	doctor, err := New(root).Doctor(context.Background())
+	if err != nil {
+		t.Fatalf("Doctor() error = %v", err)
+	}
+	if !doctor.OK || doctor.GitHooks == nil || !doctor.GitHooks.Enabled {
+		t.Fatalf("doctor result = %+v, want healthy hooks", doctor)
+	}
+}
+
+func TestHooksEnableDoesNotReplaceCustomHooksPath(t *testing.T) {
+	root := t.TempDir()
+	initGitRepoForTest(t, root)
+	if _, err := runGit(context.Background(), "-C", root, "config", "--local", "core.hooksPath", ".custom-hooks"); err != nil {
+		t.Fatalf("git config: %v", err)
+	}
+	if _, err := New(root).EnableHooks(context.Background()); err == nil {
+		t.Fatal("EnableHooks() error = nil, want custom hooks path conflict")
+	}
+	configured, err := configuredHooksPath(context.Background(), root)
+	if err != nil {
+		t.Fatalf("configuredHooksPath() error = %v", err)
+	}
+	if configured != ".custom-hooks" {
+		t.Fatalf("core.hooksPath = %q, want .custom-hooks", configured)
+	}
+}
+
+func TestEnabledPostCheckoutRunsProjectCLI(t *testing.T) {
+	root := t.TempDir()
+	initGitRepoForTest(t, root)
+	writeManifestForTest(t, root, &manifest.Manifest{
+		Version:      manifest.CurrentManifestVersion,
+		Project:      manifest.Project{Name: "sample"},
+		Dependencies: []manifest.Resource{},
+		Packages:     []manifest.Resource{},
+	})
+	cliPath := filepath.Join(root, ".ctxpm", "dependencies", "skills", "ctxpm", "cli", "ctxpm")
+	if err := os.MkdirAll(filepath.Dir(cliPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(cliPath, []byte("#!/bin/sh\nprintf '%s' \"$1\" > hook-ran\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if _, err := runGit(context.Background(), "-C", root, "add", "ctxpm.yaml"); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if _, err := runGit(context.Background(), "-C", root, "commit", "-m", "ctxpm"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+	app := New(root)
+	if _, err := app.EnableHooks(context.Background()); err != nil {
+		t.Fatalf("EnableHooks() error = %v", err)
+	}
+	if _, err := runGit(context.Background(), "-C", root, "checkout", "-b", "other"); err != nil {
+		t.Fatalf("git checkout -b: %v", err)
+	}
+	if err := os.Remove(filepath.Join(root, "hook-ran")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Remove() error = %v", err)
+	}
+	if _, err := runGit(context.Background(), "-C", root, "checkout", "-"); err != nil {
+		t.Fatalf("git checkout -: %v", err)
+	}
+	if got := readFileForTest(t, filepath.Join(root, "hook-ran")); got != "install" {
+		t.Fatalf("hook command = %q, want install", got)
 	}
 }
 

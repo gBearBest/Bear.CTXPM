@@ -72,6 +72,7 @@ type InitResult struct {
 	ManagedEntrypointUpdated   bool     `json:"managed_entrypoint_updated"`
 	CtxpmYAMLStatus            string   `json:"ctxpm_yaml_status,omitempty"`
 	LocalCLIStatus             string   `json:"local_cli_status,omitempty"`
+	GitHooksStatus             string   `json:"git_hooks_status,omitempty"`
 	Warnings                   []string `json:"warnings,omitempty"`
 	AgentDetectionEvidence     []string `json:"agent_detection_evidence,omitempty"`
 	AgentDetectionSource       string   `json:"agent_detection_source,omitempty"`
@@ -87,6 +88,7 @@ func (r InitResult) Text() string {
 	}
 	lines = append(lines, fmt.Sprintf("ctxpm dependency: %s", fallbackString(r.CtxpmDependencyStatus, "unchanged")))
 	lines = append(lines, fmt.Sprintf("Local CLI: %s", fallbackString(r.LocalCLIStatus, "not prepared")))
+	lines = append(lines, fmt.Sprintf("Git hooks: %s", fallbackString(r.GitHooksStatus, "not configured")))
 	lines = append(lines, fmt.Sprintf("Managed entrypoint updated: %s", ternary(r.ManagedEntrypointUpdated, "yes", "no")))
 	lines = append(lines, fmt.Sprintf("ctxpm compatibility complete: %s", ternary(r.CtxpmCompatibilityComplete, "yes", "no")))
 	lines = append(lines, fmt.Sprintf(".gitignore updated: %s", ternary(r.GitignoreUpdated, "yes", "no")))
@@ -239,6 +241,7 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 	ctxpmStatus := "planned"
 	ctxpmYAMLStatus := "planned"
 	localCLIStatus := ""
+	gitHooksStatus := "planned"
 	if !opts.DryRun {
 		emitProgress(opts.Progress, ProgressEvent{Phase: ProgressStart, Kind: "release", Name: "ctxpm"})
 		bundled, err := ensureBundledCtxpm(a.Root, m.Agents, currentCtxpmVersion)
@@ -256,7 +259,7 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 		resourcePlan.warnings = append(resourcePlan.warnings, bundled.Warnings...)
 
 		gitignoreRules := dedupe(append(
-			[]string{".ctxpm/dependencies/", ".ctxpm/state/"},
+			[]string{".ctxpm/dependencies/", ".ctxpm/state/", ".ctxpm/cache/", ".githooks/"},
 			compatibilityGitignoreRules(m.Agents, m.Dependencies)...,
 		))
 		gitignoreRules = dedupe(append(gitignoreRules, compatibilityGitignoreRules(m.Agents, m.Packages)...))
@@ -268,6 +271,13 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 		gitignoreUpdated = updated
 		if _, err := manifest.Save(a.Root, m); err != nil {
 			return nil, err
+		}
+		status, err := a.enableHooksByDefault(context.Background())
+		if err != nil {
+			gitHooksStatus = "failed"
+			resourcePlan.warnings = append(resourcePlan.warnings, fmt.Sprintf("could not enable default Git hooks: %v", err))
+		} else {
+			gitHooksStatus = status
 		}
 	} else {
 		ctxpmStatus = "planned"
@@ -297,6 +307,7 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 		ManagedEntrypointUpdated:   true,
 		CtxpmYAMLStatus:            ctxpmYAMLStatus,
 		LocalCLIStatus:             localCLIStatus,
+		GitHooksStatus:             gitHooksStatus,
 		Warnings:                   dedupe(append(discovery.warnings, resourcePlan.warnings...)),
 		AgentDetectionEvidence:     discovery.evidence,
 		AgentDetectionSource:       discovery.entrypointSource,
@@ -520,6 +531,7 @@ func (a *App) Validate() (*ValidateResult, error) {
 type InstallOptions struct {
 	Type                string
 	Only                string
+	Force               bool
 	DryRun              bool
 	CurrentVersion      string
 	BundledCtxpmRelease bool
@@ -607,6 +619,8 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 	}
 	actions := []InstallAction{}
 	versionUpdates := map[string]string{}
+	installState := loadInstallState(a.Root)
+	installStateChanged := false
 	installedResources := []manifest.Resource{}
 	currentCtxpmVersion := currentCtxpmManifestVersion(opts.CurrentVersion)
 	ctxpmReleaseTarget := ""
@@ -689,6 +703,17 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 			}
 			continue
 		}
+		if !opts.Force && dependencyIsCurrent(a.Root, *dep, installState.Dependencies[dep.Name]) {
+			emitProgress(opts.Progress, ProgressEvent{Phase: ProgressStart, Kind: "dependency", Name: dep.Name})
+			if err := ensureCompatibility(a.Root, m.Agents, *dep); err != nil {
+				emitProgress(opts.Progress, ProgressEvent{Phase: ProgressDone, Kind: "dependency", Name: dep.Name, Status: "failed", Err: err})
+				return nil, err
+			}
+			actions = append(actions, InstallAction{Kind: "dependency", Name: dep.Name, Status: "cached", Version: dep.Version})
+			installedResources = append(installedResources, *dep)
+			emitProgress(opts.Progress, ProgressEvent{Phase: ProgressDone, Kind: "dependency", Name: dep.Name, Status: "cached", Version: dep.Version})
+			continue
+		}
 		emitProgress(opts.Progress, ProgressEvent{Phase: ProgressStart, Kind: "dependency", Name: dep.Name})
 		installed, err := a.installResource(ctx, m.Agents, dep, dep.Version)
 		if err != nil {
@@ -700,6 +725,10 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 		if previousVersion != dep.Version {
 			versionUpdates[dep.Name] = dep.Version
 		}
+		if err := recordInstalledDependency(a.Root, &installState, *dep); err != nil {
+			return nil, err
+		}
+		installStateChanged = true
 		actions = append(actions, InstallAction{Kind: "dependency", Name: dep.Name, Status: installed.Status, Version: dep.Version})
 		installedResources = append(installedResources, *dep)
 		emitProgress(opts.Progress, ProgressEvent{Phase: ProgressDone, Kind: "dependency", Name: dep.Name, Status: installed.Status, Version: dep.Version})
@@ -743,6 +772,11 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 			return nil, err
 		}
 	}
+	if !opts.DryRun && installStateChanged {
+		if err := saveInstallState(a.Root, installState); err != nil {
+			return nil, err
+		}
+	}
 	if !opts.DryRun && shouldSyncEntrypointFromActiveCLI(m, currentCtxpmVersion, opts.BundledCtxpmRelease, ctxpmReleaseTarget) {
 		if _, err := syncManagedEntrypoints(a.Root, m, true); err != nil {
 			return nil, err
@@ -750,7 +784,7 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 	}
 	if !opts.DryRun && (len(installedResources) > 0 || len(entrypointGitignoreRules(m)) > 0) {
 		gitignoreRules := dedupe(append(
-			[]string{".ctxpm/dependencies/", ".ctxpm/state/"},
+			[]string{".ctxpm/dependencies/", ".ctxpm/state/", ".ctxpm/cache/", ".githooks/"},
 			compatibilityGitignoreRules(m.Agents, installedResources)...,
 		))
 		gitignoreRules = dedupe(append(gitignoreRules, entrypointGitignoreRules(m)...))
@@ -771,6 +805,14 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 			status = "installed_bundled"
 		}
 		actions = append(actions, InstallAction{Kind: "release", Name: "ctxpm", Status: status, Version: ctxpmReleaseTarget})
+	}
+	if !opts.DryRun {
+		status, err := a.enableHooksByDefault(ctx)
+		if err != nil {
+			actions = append(actions, InstallAction{Kind: "hook", Name: "git hooks", Status: "failed"})
+		} else if status != "not_git_repository" {
+			actions = append(actions, InstallAction{Kind: "hook", Name: "git hooks", Status: status})
+		}
 	}
 	return &InstallResult{Status: ternary(opts.DryRun, "dry_run", "applied"), Actions: actions}, nil
 }
@@ -1076,6 +1118,8 @@ func (a *App) Update(ctx context.Context, opts UpdateOptions) (*UpdateResult, er
 
 	result := &UpdateResult{Status: ternary(opts.DryRun, "dry_run", "applied")}
 	versionUpdates := map[string]string{}
+	installState := loadInstallState(a.Root)
+	installStateChanged := false
 	ctxpmSelected := targets["ctxpm"]
 	for i := range m.Dependencies {
 		dep := &m.Dependencies[i]
@@ -1113,6 +1157,10 @@ func (a *App) Update(ctx context.Context, opts UpdateOptions) (*UpdateResult, er
 			if current != dep.Version {
 				versionUpdates[dep.Name] = dep.Version
 			}
+			if err := recordInstalledDependency(a.Root, &installState, *dep); err != nil {
+				return nil, err
+			}
+			installStateChanged = true
 			result.Applied = append(result.Applied, UpdateAction{
 				Name:           dep.Name,
 				Status:         "updated",
@@ -1131,6 +1179,11 @@ func (a *App) Update(ctx context.Context, opts UpdateOptions) (*UpdateResult, er
 	}
 	if !opts.DryRun && len(versionUpdates) > 0 {
 		if _, err := manifest.UpdateResourceVersions(a.Root, versionUpdates); err != nil {
+			return nil, err
+		}
+	}
+	if !opts.DryRun && installStateChanged {
+		if err := saveInstallState(a.Root, installState); err != nil {
 			return nil, err
 		}
 	}

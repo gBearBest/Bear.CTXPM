@@ -89,8 +89,8 @@ func run(args []string) error {
 		return runValidate(app, args[1:])
 	case "install":
 		return runInstall(app, args[1:])
-	case "entrypoint":
-		return runEntrypoint(app, args[1:])
+	case "doctor":
+		return runDoctor(app, args[1:])
 	case "detect":
 		return runDetect(app, args[1:])
 	case "migrate":
@@ -244,6 +244,7 @@ func runInstall(app *engine.App, args []string) error {
 	fs.SetOutput(os.Stderr)
 	resourceType := fs.String("type", "", "Only install resources of this type")
 	only := fs.String("only", "", "Only install or repair a single resource by name")
+	force := fs.Bool("force", false, "Reinstall dependencies even when their local state is current")
 	dryRun := fs.Bool("dry-run", false, "Report the work without writing files")
 	jsonOutput := fs.Bool("json", false, "Emit JSON output")
 	if err := fs.Parse(args); err != nil {
@@ -260,6 +261,7 @@ func runInstall(app *engine.App, args []string) error {
 	result, err := app.Install(context.Background(), engine.InstallOptions{
 		Type:                *resourceType,
 		Only:                *only,
+		Force:               *force,
 		DryRun:              *dryRun,
 		CurrentVersion:      cliVersion(),
 		BundledCtxpmRelease: os.Getenv(engine.CtxpmReleaseSyncEnv) == "1",
@@ -271,26 +273,18 @@ func runInstall(app *engine.App, args []string) error {
 	return printMaybeJSON(result, *jsonOutput)
 }
 
-func runEntrypoint(app *engine.App, args []string) error {
-	if len(args) == 0 {
-		return failf(2, "usage: ctxpm entrypoint doctor [options]")
+func runDoctor(app *engine.App, args []string) error {
+	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	jsonOutput := fs.Bool("json", false, "Emit JSON output")
+	if err := fs.Parse(args); err != nil {
+		return err
 	}
-	switch args[0] {
-	case "doctor":
-		fs := flag.NewFlagSet("entrypoint doctor", flag.ContinueOnError)
-		fs.SetOutput(os.Stderr)
-		jsonOutput := fs.Bool("json", false, "Emit JSON output")
-		if err := fs.Parse(args[1:]); err != nil {
-			return err
-		}
-		result, err := app.EntrypointDoctor()
-		if err != nil {
-			return err
-		}
-		return printMaybeJSON(result, *jsonOutput)
-	default:
-		return failf(2, "unknown entrypoint command %q", args[0])
+	result, err := app.Doctor(context.Background())
+	if err != nil {
+		return err
 	}
+	return printMaybeJSON(result, *jsonOutput)
 }
 
 func runDetect(app *engine.App, args []string) error {
@@ -569,10 +563,10 @@ func printHelp(w *os.File) {
 		"  version        Print CLI version information",
 		"  init           Initialize the current project as a Bear.CTXPM project",
 		"  add            Add and install an external AI resource from a URL",
-		"  entrypoint     Diagnose shared root entrypoint files",
 		"  detect         Detect unmanaged AI resources that may need migration",
 		"  migrate        Migrate detected AI resources into ctxpm-managed roots",
 		"  install        Install dependencies and repair compatibility links",
+		"  doctor         Diagnose managed entrypoints and Git dependency hooks",
 		"  list           List dependencies and packages",
 		"  memory         Search, suggest, capture, or prune project memories",
 		"  validate       Validate ctxpm.yaml and local paths",
@@ -585,7 +579,7 @@ func printHelp(w *os.File) {
 		"  ctxpm init --agent codex",
 		"  ctxpm add https://github.com/example/ai/tree/main/skills/reviewer --type skill",
 		"  ctxpm add https://gitlab.company.com/team/ai-resources.git --type rule --source-path rules/security",
-		"  ctxpm entrypoint doctor",
+		"  ctxpm doctor",
 		"  ctxpm memory search --query billing",
 		"  ctxpm install",
 		"  ctxpm update --all",
