@@ -168,7 +168,7 @@ packages:
     entry: MEMORY.md
 ```
 
-Use `.ctxpm/AGENTS.md` as the canonical managed entrypoint source file. All root-level agent entrypoint filenames (`AGENTS.md`, `CLAUDE.md`, `ANTIGRAVITY.md`, `GEMINI.md`, etc.) are symlinks pointing directly to `.ctxpm/AGENTS.md`. Keep all of these root-level symlinks out of Git with `.gitignore`.
+Use `.ctxpm/AGENTS.md` as the canonical managed entrypoint source file. All root-level agent entrypoint filenames (`AGENTS.md`, `CLAUDE.md`, `ANTIGRAVITY.md`, `GEMINI.md`, etc.) are symlinks pointing directly to `.ctxpm/AGENTS.md`. Commit the canonical source file and the root-level entrypoint symlinks for the declared agents to Git. Their relative targets allow a fresh clone to expose the instructions before installing dependencies. Other derived resource compatibility links remain ignored.
 
 ## Lifecycle Rules
 

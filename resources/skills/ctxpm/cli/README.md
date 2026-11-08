@@ -135,7 +135,9 @@ When installing a parent with `--only` or `--type`, nested dependencies outside 
 ctxpm doctor [--json]
 ```
 
-Git deliberately does not run repository hooks during clone, so a fresh clone becomes configured when its first `ctxpm init` or `ctxpm install` runs. ctxpm refuses to replace a different configured hook path or an existing non-ctxpm hook file. The hooks remain non-blocking: an unavailable CLI or failed dependency restore prints a diagnostic but does not fail the Git operation.
+A clone does not carry ctxpm's repository-local hook configuration, so run `ctxpm install` after cloning to restore locked dependencies and configure hooks. Git can run hooks installed independently through templates or global configuration during clone. ctxpm refuses to replace a different configured hook path or an existing non-ctxpm hook file. The hooks remain non-blocking: an unavailable CLI or failed dependency restore prints a diagnostic but does not fail the Git operation.
+
+Commit `.ctxpm/AGENTS.md` and the root entrypoint symlinks along with `ctxpm.yaml`. On systems that check out Git symlinks as plain files (for example, Windows with `core.symlinks=false`), an agent cannot read the shared instructions through those files. Enable symlink support and the necessary OS permissions, then check out the repository again; use `ctxpm doctor` to inspect the result. Existing projects may need to remove old entrypoint ignore rules and commit their links. A project locked to an older ctxpm release may retain the older behavior until upgraded.
 
 The command also checks the managed root entrypoint topology: `.ctxpm/AGENTS.md` is the single source of truth and root-level entrypoint filenames (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, etc.) are symlinks. Safe, read-only. Run to diagnose drift before `ctxpm install`.
 

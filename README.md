@@ -93,7 +93,7 @@ Where:
 - `.ctxpm/dependencies/`: the workspace for external resources, which should be ignored by default in `.gitignore`.
 - `.ctxpm/packages/`: the directory for project-local resources, which should be committed to version control by default.
 - `.ctxpm/AGENTS.md`: the canonical managed entrypoint file where content is stored.
-- Root entrypoint filenames (`AGENTS.md`, `CLAUDE.md`, etc.): symlinks pointing directly to `.ctxpm/AGENTS.md`; created and repaired by `ctxpm install` and kept out of version control via `.gitignore`.
+- Root entrypoint filenames (`AGENTS.md`, `CLAUDE.md`, etc.): symlinks pointing directly to `.ctxpm/AGENTS.md`; created and repaired by `ctxpm install`; commit them to Git along with `.ctxpm/AGENTS.md` and `ctxpm.yaml`.
 
 ## Design Principles
 
@@ -117,11 +117,15 @@ When an AI takes over a Bear.CTXPM project, it is recommended to follow this wor
 5. Maintain the managed `ctxpm` block in `.ctxpm/AGENTS.md` and keep any agent-specific root entrypoint symlinks pointing to it.
 6. When an operation cannot be completed safely, report the issue and provide organization suggestions.
 
+Commit `.ctxpm/AGENTS.md`, `ctxpm.yaml`, and the root entrypoint symlinks so a fresh clone can read the instructions before dependencies are restored. On Windows or another environment where Git checks out symlinks as plain files (`core.symlinks=false`), enable symlink support and the necessary operating system permissions, then check out the repository again. Use `ctxpm doctor` to inspect the result. Existing projects may need to remove old entrypoint ignore rules and commit their links; a project locked to an older ctxpm release may keep the old behavior until upgraded.
+
+After creating or repairing an entrypoint, ctxpm removes its exact root-anchored ignore rule (for example `/AGENTS.md`) so it can be committed. Broader or externally configured ignore rules are left in place and reported for review.
+
 ## Git Dependency Restoration
 
 `ctxpm.yaml` locks every external dependency to a specific version. `ctxpm install` restores those locked versions and uses ignored local state and Git object caches so unchanged dependencies are not fetched again. It does not discover or select newer upstream resources; use `ctxpm check-updates` and the confirmation-driven `ctxpm update` workflow for that.
 
-`ctxpm init` and `ctxpm install` configure repository-local hooks by default. They run `ctxpm install` after checkout, merge-based pull, rebase, and rebase-based pull. Git does not run hooks during clone, so a fresh clone becomes configured when its first initialization or installation runs. Existing custom hook paths are left unchanged. `ctxpm doctor` reports entrypoint and hook state, while `ctxpm install` repairs hooks. The hooks are non-blocking.
+`ctxpm init` and `ctxpm install` configure repository-local hooks by default. They run `ctxpm install` after checkout, merge-based pull, rebase, and rebase-based pull. A clone does not carry ctxpm’s repository-local hook configuration, so run `ctxpm install` after cloning to restore dependencies and configure hooks. Git may run hooks provided independently by templates or global configuration. Existing custom hook paths are left unchanged. `ctxpm doctor` reports entrypoint and hook state, while `ctxpm install` repairs hooks. The hooks are non-blocking.
 
 ## Non-goals in v0.1
 
