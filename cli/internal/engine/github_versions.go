@@ -35,22 +35,33 @@ func resolveGitHubPathVersion(ctx context.Context, resource manifest.Resource) (
 	if resourcePath == "" {
 		return "", true, fmt.Errorf("GitHub resource %q has no source.path", resource.Name)
 	}
+	if scope, ok := ctx.Value(githubCheckScopeKey{}).(*githubCheckScope); ok {
+		if version, handled, err := scope.resolve(ctx, owner, repo, strings.TrimSpace(resource.Source.Ref), resourcePath); handled {
+			return version, true, err
+		}
+	}
+	version, err := fetchGitHubCommit(ctx, owner, repo, resourcePath, strings.TrimSpace(resource.Source.Ref))
+	return version, true, err
+}
 
+func fetchGitHubCommit(ctx context.Context, owner, repo, resourcePath, ref string) (string, error) {
 	endpoint, err := url.Parse(strings.TrimRight(githubAPIBaseURL, "/") + "/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo) + "/commits")
 	if err != nil {
-		return "", true, fmt.Errorf("invalid GitHub API endpoint: %w", err)
+		return "", fmt.Errorf("invalid GitHub API endpoint: %w", err)
 	}
 	query := endpoint.Query()
-	query.Set("path", resourcePath)
+	if resourcePath != "" {
+		query.Set("path", resourcePath)
+	}
 	query.Set("per_page", "1")
-	if ref := strings.TrimSpace(resource.Source.Ref); ref != "" {
+	if ref != "" {
 		query.Set("sha", ref)
 	}
 	endpoint.RawQuery = query.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
 	if err != nil {
-		return "", true, err
+		return "", err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", userAgent)
@@ -61,21 +72,21 @@ func resolveGitHubPathVersion(ctx context.Context, resource manifest.Resource) (
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", true, fmt.Errorf("GitHub commit lookup failed: %w", err)
+		return "", fmt.Errorf("GitHub commit lookup failed: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return "", true, fmt.Errorf("GitHub commit lookup for %s/%s failed with status %s", owner, repo, resp.Status)
+		return "", fmt.Errorf("GitHub commit lookup for %s/%s failed with status %s", owner, repo, resp.Status)
 	}
 
 	var commits []githubCommit
 	if err := json.NewDecoder(resp.Body).Decode(&commits); err != nil {
-		return "", true, fmt.Errorf("decode GitHub commit lookup for %s/%s: %w", owner, repo, err)
+		return "", fmt.Errorf("decode GitHub commit lookup for %s/%s: %w", owner, repo, err)
 	}
 	if len(commits) == 0 || !isGitObjectID(commits[0].SHA) {
-		return "", true, fmt.Errorf("GitHub commit lookup for %s/%s returned no valid path commit", owner, repo)
+		return "", fmt.Errorf("GitHub commit lookup for %s/%s returned no valid commit", owner, repo)
 	}
-	return strings.ToLower(commits[0].SHA), true, nil
+	return strings.ToLower(commits[0].SHA), nil
 }
 
 func githubRepository(rawURL string) (owner, repo string, ok bool) {

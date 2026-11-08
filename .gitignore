@@ -9,6 +9,8 @@
 
 .ctxpm/dependencies/
 .ctxpm/state/
+.ctxpm/cache/
+.githooks/
 .agents/skills/
 .agents/rules/
 .claude/skills/

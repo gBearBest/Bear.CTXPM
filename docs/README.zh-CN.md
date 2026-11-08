@@ -117,6 +117,12 @@ project/
 5. 维护 `.ctxpm/AGENTS.md` 中的 `ctxpm` 受管区块，并确保各 agent 的根入口 alias 始终与这份 canonical 源文件同步。
 6. 在无法安全完成操作时，报告问题并给出整理建议。
 
+## Git 依赖恢复
+
+`ctxpm.yaml` 将每个外部依赖锁定到明确版本。`ctxpm install` 会恢复这些锁定版本，并使用被忽略的本地状态和 Git 对象缓存，因此未变化的依赖不会再次拉取。它不会发现或自行选择上游新版本；应通过 `ctxpm check-updates` 和需要确认的 `ctxpm update` 流程更新。
+
+`ctxpm init` 与 `ctxpm install` 会在 Git 工作树中默认配置仓库本地 hook，使 `checkout`、基于 merge 的 `pull`、`rebase` 与 `pull --rebase` 后自动执行 `ctxpm install`。Git 不会在 clone 时执行 hook，因此新 clone 会在首次初始化或安装时完成配置。已有的自定义 hook 路径不会被覆盖。`ctxpm doctor` 会报告入口和 hook 状态，`ctxpm install` 会修复 hook。hook 不阻塞 Git 操作。
+
 ## v0.1 非目标
 
 Bear.CTXPM v0.1 不要求：
