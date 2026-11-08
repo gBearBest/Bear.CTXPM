@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -126,9 +125,10 @@ func validateManagedEntrypoints(root string, m *manifest.Manifest) []string {
 		validateAlias := func(alias string) {
 			aliasAbs := filepath.Join(root, alias)
 			relTarget, _ := filepath.Rel(filepath.Dir(aliasAbs), sourceAbs)
+			relTarget = filepath.ToSlash(relTarget)
 			current, err := os.Readlink(aliasAbs)
 			if err == nil {
-				if current != relTarget {
+				if filepath.ToSlash(current) != relTarget {
 					issues = append(issues, fmt.Sprintf("entrypoint alias %q points to %q instead of %q", alias, current, relTarget))
 				}
 				return
@@ -138,6 +138,10 @@ func validateManagedEntrypoints(root string, m *manifest.Manifest) []string {
 				return
 			}
 			if _, statErr := os.Lstat(aliasAbs); statErr == nil {
+				if gitSymlinkPlaceholder(root, alias, relTarget) {
+					issues = append(issues, gitSymlinkPlaceholderGuidance(alias))
+					return
+				}
 				issues = append(issues, entrypointMergeGuidance([]string{alias}))
 				return
 			}
@@ -151,6 +155,18 @@ func validateManagedEntrypoints(root string, m *manifest.Manifest) []string {
 				continue
 			}
 			validateAlias(alias)
+		}
+	}
+	// Warn when an untracked source or alias would be omitted from commits.
+	paths := []string{manifest.CanonicalEntrypointSourceFile(), manifest.CanonicalEntrypointFile()}
+	for _, agent := range agents {
+		if file := manifest.EntrypointFile(agent); file != "" {
+			paths = append(paths, file)
+		}
+	}
+	for _, path := range dedupe(paths) {
+		if _, err := os.Lstat(filepath.Join(root, path)); err == nil && ignoredEntrypoint(root, path) {
+			issues = append(issues, fmt.Sprintf("entrypoint %q is ignored by Git; inspect .gitignore and Git exclude rules so it can be committed", path))
 		}
 	}
 	return dedupe(issues)
@@ -169,20 +185,6 @@ func entrypointAgents(m *manifest.Manifest) []string {
 	}
 	sort.Strings(agents)
 	return agents
-}
-
-func entrypointGitignoreRules(m *manifest.Manifest) []string {
-	// Always gitignore the root AGENTS.md symlink; the source lives in .ctxpm/AGENTS.md.
-	// Use a leading "/" so the rule matches only the project root, not .ctxpm/AGENTS.md.
-	rules := []string{"/" + manifest.CanonicalEntrypointFile()}
-	for _, agent := range entrypointAgents(m) {
-		file := manifest.EntrypointFile(agent)
-		if file == "" || file == manifest.CanonicalEntrypointFile() {
-			continue
-		}
-		rules = append(rules, "/"+file)
-	}
-	return dedupe(rules)
 }
 
 func entrypointMergeGuidance(files []string) string {
@@ -207,8 +209,8 @@ func seedCanonicalEntrypoint(root string, m *manifest.Manifest) error {
 		return err
 	}
 
-	// Collect all real (non-symlink) root-level entrypoint files as migration candidates,
-	// including AGENTS.md itself (which was the canonical file before this change).
+	// Collect existing entrypoint contents, including links to legacy files.
+	// The target of a legacy link is copied, not moved or removed.
 	candidateFiles := []string{manifest.CanonicalEntrypointFile()}
 	for _, agent := range entrypointAgents(m) {
 		file := manifest.EntrypointFile(agent)
@@ -219,6 +221,7 @@ func seedCanonicalEntrypoint(root string, m *manifest.Manifest) error {
 	}
 
 	candidates := []string{}
+	var candidateInfo []os.FileInfo
 	for _, file := range dedupe(candidateFiles) {
 		abs := filepath.Join(root, file)
 		info, err := os.Lstat(abs)
@@ -228,12 +231,31 @@ func seedCanonicalEntrypoint(root string, m *manifest.Manifest) error {
 		if err != nil {
 			return err
 		}
+		resolvedInfo := info
 		if info.Mode()&os.ModeSymlink != 0 {
+			if resolvedInfo, err = os.Stat(abs); errors.Is(err, os.ErrNotExist) {
+				continue
+			} else if err != nil {
+				return err
+			}
+		}
+		duplicate := false
+		for i, existing := range candidateInfo {
+			if os.SameFile(existing, resolvedInfo) {
+				duplicate = true
+				// Prefer moving a root file to copying through its alias.
+				if info.Mode().IsRegular() {
+					candidates[i] = abs
+				}
+				break
+			}
+		}
+		if duplicate {
 			continue
 		}
 		candidates = append(candidates, abs)
+		candidateInfo = append(candidateInfo, resolvedInfo)
 	}
-	candidates = dedupe(candidates)
 	if len(candidates) == 0 {
 		return nil
 	}
@@ -243,6 +265,17 @@ func seedCanonicalEntrypoint(root string, m *manifest.Manifest) error {
 			labels = append(labels, filepath.Base(candidate))
 		}
 		return errors.New(entrypointMergeGuidance(labels))
+	}
+	info, err := os.Lstat(candidates[0])
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		data, err := os.ReadFile(candidates[0])
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(sourceAbs, data, 0o644)
 	}
 	return os.Rename(candidates[0], sourceAbs)
 }
@@ -255,9 +288,34 @@ func ensureEntrypointAlias(aliasPath, canonicalPath string) error {
 	if err != nil {
 		return err
 	}
+	relTarget = filepath.ToSlash(relTarget)
 	if current, err := os.Readlink(aliasPath); err == nil {
-		if current == relTarget {
+		if filepath.ToSlash(current) == relTarget {
 			return nil
+		}
+		// Never discard unique instructions reachable through a legacy link.
+		if _, statErr := os.Stat(aliasPath); statErr == nil {
+			same, compareErr := sameFileContents(aliasPath, canonicalPath)
+			if compareErr != nil {
+				return compareErr
+			}
+			if !same {
+				same, compareErr = sameManagedEntrypointEnvelope(aliasPath, canonicalPath)
+				if compareErr != nil {
+					return compareErr
+				}
+			}
+			if !same {
+				same, compareErr = sameAfterManagedBlockUpdate(aliasPath, canonicalPath)
+				if compareErr != nil {
+					return compareErr
+				}
+			}
+			if !same {
+				return errors.New(entrypointMergeGuidance([]string{filepath.Base(aliasPath)}))
+			}
+		} else if !errors.Is(statErr, os.ErrNotExist) {
+			return statErr
 		}
 		if err := os.Remove(aliasPath); err != nil {
 			return err
@@ -266,6 +324,9 @@ func ensureEntrypointAlias(aliasPath, canonicalPath string) error {
 		info, statErr := os.Lstat(aliasPath)
 		if statErr != nil {
 			return err
+		}
+		if gitSymlinkPlaceholder(filepath.Dir(aliasPath), filepath.Base(aliasPath), relTarget) {
+			return errors.New(gitSymlinkPlaceholderGuidance(filepath.Base(aliasPath)))
 		}
 		if info.IsDir() {
 			return errors.New(entrypointMergeGuidance([]string{filepath.Base(aliasPath)}))
@@ -281,6 +342,12 @@ func ensureEntrypointAlias(aliasPath, canonicalPath string) error {
 			}
 		}
 		if !same {
+			same, sameErr = sameAfterManagedBlockUpdate(aliasPath, canonicalPath)
+			if sameErr != nil {
+				return sameErr
+			}
+		}
+		if !same {
 			return errors.New(entrypointMergeGuidance([]string{filepath.Base(aliasPath)}))
 		}
 		if err := os.Remove(aliasPath); err != nil {
@@ -291,6 +358,19 @@ func ensureEntrypointAlias(aliasPath, canonicalPath string) error {
 		return errors.New(entrypointMergeGuidance([]string{filepath.Base(aliasPath)}))
 	}
 	return os.Symlink(relTarget, aliasPath)
+}
+
+func sameAfterManagedBlockUpdate(legacyPath, canonicalPath string) (bool, error) {
+	legacy, err := os.ReadFile(legacyPath)
+	if err != nil {
+		return false, err
+	}
+	canonical, err := os.ReadFile(canonicalPath)
+	if err != nil {
+		return false, err
+	}
+	updated, err := updateManagedBlock(string(legacy), manifest.ManagedEntrypoint(), false)
+	return err == nil && updated == string(canonical), nil
 }
 
 func sameFileContents(leftPath, rightPath string) (bool, error) {
@@ -332,57 +412,4 @@ func managedEntrypointEnvelope(content string) (string, string, bool) {
 		return "", "", false
 	}
 	return content[:start], content[endIndex:], true
-}
-
-// stageEntrypointMigration detects when AGENTS.md was just migrated from a
-// tracked root file to a symlink pointing at .ctxpm/AGENTS.md and automatically
-// applies the corresponding git index operations so the user does not need to
-// run git commands manually. This is best-effort: if git is unavailable or the
-// root is not a git repo the function is a no-op.
-//
-// Operations performed:
-//   - git rm --cached AGENTS.md  (when index has it as a regular file but disk has a symlink)
-//   - git add .ctxpm/AGENTS.md   (when the source file is not yet in the index)
-//   - git add .gitignore          (when .gitignore has unstaged modifications)
-func stageEntrypointMigration(root string) []string {
-	ctx := context.Background()
-	if _, err := runGit(ctx, "-C", root, "rev-parse", "--git-dir"); err != nil {
-		return nil
-	}
-
-	var staged []string
-	canonical := manifest.CanonicalEntrypointFile()
-	source := manifest.CanonicalEntrypointSourceFile()
-
-	// If AGENTS.md is tracked in the git index as a regular file (mode 100644)
-	// but is now a symlink on disk, remove it from the index.
-	lsOut, err := runGit(ctx, "-C", root, "ls-files", "--stage", "--", canonical)
-	if err == nil && strings.HasPrefix(lsOut, "100644") {
-		info, statErr := os.Lstat(filepath.Join(root, canonical))
-		if statErr == nil && info.Mode()&os.ModeSymlink != 0 {
-			if _, rmErr := runGit(ctx, "-C", root, "rm", "--cached", "--", canonical); rmErr == nil {
-				staged = append(staged, "git rm --cached "+canonical)
-			}
-		}
-	}
-
-	// If .ctxpm/AGENTS.md exists on disk but is not yet in the git index, stage it.
-	lsOut, err = runGit(ctx, "-C", root, "ls-files", "--", source)
-	if err == nil && strings.TrimSpace(lsOut) == "" {
-		if _, statErr := os.Lstat(filepath.Join(root, source)); statErr == nil {
-			if _, addErr := runGit(ctx, "-C", root, "add", "--", source); addErr == nil {
-				staged = append(staged, "git add "+source)
-			}
-		}
-	}
-
-	// Stage .gitignore if it has unstaged changes.
-	diffOut, err := runGit(ctx, "-C", root, "diff", "--name-only", "--", ".gitignore")
-	if err == nil && strings.TrimSpace(diffOut) != "" {
-		if _, addErr := runGit(ctx, "-C", root, "add", "--", ".gitignore"); addErr == nil {
-			staged = append(staged, "git add .gitignore")
-		}
-	}
-
-	return staged
 }
