@@ -2060,9 +2060,14 @@ func TestCheckUpdatesRechecksLocalSelfBundleWhenRemoteResultIsCached(t *testing.
 		Packages: []manifest.Resource{},
 	})
 	statePath := filepath.Join(root, ".ctxpm", "state", "update-checks.json")
+	m, _, err := manifest.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := writeCheckState(statePath, &CheckUpdatesResult{
-		Status:    "checked",
-		CheckedAt: time.Now().UTC().Format(time.RFC3339),
+		cacheFingerprint: checkManifestFingerprint(m),
+		Status:           "checked",
+		CheckedAt:        time.Now().UTC().Format(time.RFC3339),
 		Dependencies: []DependencyUpdate{{
 			Name: "ctxpm", Type: "skill", Path: ".ctxpm/dependencies/skills/ctxpm", SourceType: "release",
 			Status: "up_to_date", CurrentVersion: "v1.0.0", LatestVersion: "v1.0.0",

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gBearBest/Bear.CTXPM/cli/internal/manifest"
@@ -139,6 +141,13 @@ func (r InitResult) Text() string {
 }
 
 func (a *App) Init(opts InitOptions) (*InitResult, error) {
+	if !opts.DryRun {
+		_, unlock, err := acquireProjectWrite(context.Background(), a.Root)
+		if err != nil {
+			return nil, err
+		}
+		defer unlock()
+	}
 	projectName := strings.TrimSpace(opts.ProjectName)
 	if projectName == "" {
 		projectName = filepath.Base(a.Root)
@@ -340,6 +349,15 @@ func (r AddResult) Text() string {
 }
 
 func (a *App) Add(ctx context.Context, opts AddOptions) (*AddResult, error) {
+	if !opts.DryRun {
+		var unlock func()
+		var err error
+		ctx, unlock, err = acquireProjectWrite(ctx, a.Root)
+		if err != nil {
+			return nil, err
+		}
+		defer unlock()
+	}
 	if err := ensureManifestVersion(a.Root, false); err != nil {
 		return nil, err
 	}
@@ -536,6 +554,7 @@ type InstallOptions struct {
 	CurrentVersion      string
 	BundledCtxpmRelease bool
 	SkipCtxpmRelease    bool
+	SkipDependencies    map[string]bool
 	Progress            func(ProgressEvent)
 }
 
@@ -589,6 +608,16 @@ func (r InstallResult) Text() string {
 }
 
 func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult, error) {
+	ctx = withGitFetchScope(ctx)
+	var unlock func()
+	if !opts.DryRun {
+		var err error
+		ctx, unlock, err = acquireProjectWrite(ctx, a.Root)
+		if err != nil {
+			return nil, err
+		}
+		defer unlock()
+	}
 	if err := ensureManifestVersion(a.Root, false); err != nil {
 		return nil, err
 	}
@@ -616,6 +645,16 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 	if manifestChanged {
 		sortResources(m.Dependencies)
 		sortResources(m.Packages)
+		if !opts.DryRun {
+			if _, err := manifest.Save(a.Root, m); err != nil {
+				return nil, err
+			}
+			manifestChanged = false
+		}
+	}
+	overlaps, err := resourcePathOverlaps(a.Root, m)
+	if err != nil {
+		return nil, err
 	}
 	actions := []InstallAction{}
 	versionUpdates := map[string]string{}
@@ -624,8 +663,16 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 	installedResources := []manifest.Resource{}
 	currentCtxpmVersion := currentCtxpmManifestVersion(opts.CurrentVersion)
 	ctxpmReleaseTarget := ""
+	completedTrees := map[string]bool{}
+	allResources := append(append([]manifest.Resource(nil), m.Dependencies...), m.Packages...)
 	for i := range m.Dependencies {
 		dep := &m.Dependencies[i]
+		if completedTrees[dep.Name] {
+			continue
+		}
+		if opts.SkipDependencies[dep.Name] {
+			continue
+		}
 		if dep.Name == "ctxpm" && opts.SkipCtxpmRelease {
 			continue
 		}
@@ -703,7 +750,7 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 			}
 			continue
 		}
-		if !opts.Force && dependencyIsCurrent(a.Root, *dep, installState.Dependencies[dep.Name]) {
+		if !opts.Force && overlayDependencyIsCurrent(a.Root, *dep, allResources, installState.Dependencies[dep.Name]) {
 			emitProgress(opts.Progress, ProgressEvent{Phase: ProgressStart, Kind: "dependency", Name: dep.Name})
 			if err := ensureCompatibility(a.Root, m.Agents, *dep); err != nil {
 				emitProgress(opts.Progress, ProgressEvent{Phase: ProgressDone, Kind: "dependency", Name: dep.Name, Status: "failed", Err: err})
@@ -715,6 +762,37 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 			continue
 		}
 		emitProgress(opts.Progress, ProgressEvent{Phase: ProgressStart, Kind: "dependency", Name: dep.Name})
+		if dep.Name != "ctxpm" && strings.TrimSpace(dep.Version) != "" {
+			preserve := map[string]bool{}
+			for _, member := range m.Dependencies {
+				if (opts.Only != "" && member.Name != opts.Only) || (opts.Type != "" && member.Type != opts.Type) || opts.SkipDependencies[member.Name] {
+					preserve[member.Name] = true
+				}
+			}
+			trees, err := buildResourceTrees(a.Root, m, map[string]bool{dep.Name: true}, preserve)
+			if err != nil {
+				return nil, err
+			}
+			if err := a.commitPreparedResourceTree(ctx, m, trees[0], map[string]string{}, &installState); err != nil {
+				return nil, fmt.Errorf("install resource tree %q: %w", dep.Name, err)
+			}
+			for _, member := range trees[0].Members {
+				if trees[0].preserve[member.Name] {
+					continue
+				}
+				completedTrees[member.Name] = true
+				if err := ensureCompatibility(a.Root, m.Agents, member); err != nil {
+					return nil, err
+				}
+				installedResources = append(installedResources, member)
+				actions = append(actions, InstallAction{Kind: "dependency", Name: member.Name, Status: "installed", Version: member.Version})
+				emitProgress(opts.Progress, ProgressEvent{Phase: ProgressDone, Kind: "dependency", Name: member.Name, Status: "installed", Version: member.Version})
+			}
+			continue
+		}
+		if err := checkParentReplacement(a.Root, overlaps, dep.Name); err != nil {
+			return nil, err
+		}
 		installed, err := a.installResource(ctx, m.Agents, dep, dep.Version)
 		if err != nil {
 			emitProgress(opts.Progress, ProgressEvent{Phase: ProgressDone, Kind: "dependency", Name: dep.Name, Status: "failed", Err: err})
@@ -793,6 +871,8 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 		}
 	}
 	if !opts.DryRun && ctxpmReleaseTarget != "" {
+		unlock()
+		ctx = context.WithValue(ctx, projectWriteKey{}, nil)
 		releaseResult, err := runCtxpmReleaseInstall(a, ctx, CtxpmReleaseUpdateOptions{
 			Version:        ctxpmReleaseTarget,
 			CurrentVersion: currentCtxpmVersion,
@@ -832,6 +912,8 @@ func shouldSyncEntrypointFromActiveCLI(m *manifest.Manifest, currentVersion stri
 }
 
 type CheckUpdatesOptions struct {
+	Names          []string
+	Explicit       bool
 	Force          bool
 	CurrentVersion string
 	Progress       func(ProgressEvent)
@@ -851,12 +933,13 @@ type DependencyUpdate struct {
 }
 
 type CheckUpdatesResult struct {
-	Status          string                `json:"status"`
-	CheckedAt       string                `json:"checked_at,omitempty"`
-	LastFullCheckAt string                `json:"last_full_check_at,omitempty"`
-	NextCheckAt     string                `json:"next_check_at,omitempty"`
-	Policy          manifest.UpdatePolicy `json:"policy"`
-	Dependencies    []DependencyUpdate    `json:"dependencies"`
+	cacheFingerprint string
+	Status           string                `json:"status"`
+	CheckedAt        string                `json:"checked_at,omitempty"`
+	LastFullCheckAt  string                `json:"last_full_check_at,omitempty"`
+	NextCheckAt      string                `json:"next_check_at,omitempty"`
+	Policy           manifest.UpdatePolicy `json:"policy"`
+	Dependencies     []DependencyUpdate    `json:"dependencies"`
 }
 
 func (r CheckUpdatesResult) Text() string {
@@ -887,6 +970,7 @@ func (r CheckUpdatesResult) Text() string {
 }
 
 func (a *App) CheckUpdates(ctx context.Context, opts CheckUpdatesOptions) (*CheckUpdatesResult, error) {
+	ctx = withGitFetchScope(ctx)
 	m, _, err := manifest.Load(a.Root)
 	if err != nil {
 		return nil, err
@@ -904,7 +988,7 @@ func (a *App) CheckUpdates(ctx context.Context, opts CheckUpdatesOptions) (*Chec
 
 	now := time.Now().UTC()
 	statePath := filepath.Join(a.Root, ".ctxpm", "state", "update-checks.json")
-	if !boolValue(policy.Enabled, true) {
+	if !opts.Explicit && !boolValue(policy.Enabled, true) {
 		return &CheckUpdatesResult{
 			Status:       "disabled",
 			CheckedAt:    now.Format(time.RFC3339),
@@ -913,8 +997,8 @@ func (a *App) CheckUpdates(ctx context.Context, opts CheckUpdatesOptions) (*Chec
 		}, nil
 	}
 
-	if !opts.Force {
-		if cached, ok := maybeReuseCheckState(statePath, now, policy.Interval); ok {
+	if !opts.Force && len(opts.Names) == 0 {
+		if cached, ok := maybeReuseCheckState(statePath, now, policy.Interval, checkManifestFingerprint(m)); ok {
 			cached.Policy = policy
 			ok = a.refreshCachedCtxpmCheck(cached, m, opts.CurrentVersion, boolValue(policy.IncludeSelf, true))
 			if ok {
@@ -923,54 +1007,97 @@ func (a *App) CheckUpdates(ctx context.Context, opts CheckUpdatesOptions) (*Chec
 		}
 	}
 
-	results := []DependencyUpdate{}
+	selected := map[string]bool{}
+	for _, name := range opts.Names {
+		if _, ok := findDependency(m.Dependencies, name); !ok {
+			return nil, fmt.Errorf("dependency %q was not found", name)
+		}
+		selected[name] = true
+	}
+	deps := make([]manifest.Resource, 0, len(m.Dependencies))
 	for _, dep := range m.Dependencies {
-		if dep.Name == "ctxpm" {
-			if boolValue(policy.IncludeSelf, true) {
-				results = append(results, a.checkCtxpmDependency(ctx, dep, m.Agents, opts.CurrentVersion))
+		if len(selected) > 0 && !selected[dep.Name] {
+			continue
+		}
+		if dep.Name == "ctxpm" && !boolValue(policy.IncludeSelf, true) && !selected[dep.Name] {
+			continue
+		}
+		deps = append(deps, dep)
+	}
+	ctx, githubScope := withGitHubCheckScope(ctx, a.Root, deps)
+	results := make([]DependencyUpdate, len(deps))
+	jobs := make(chan int)
+	var workers sync.WaitGroup
+	var progressMu, gitMu sync.Mutex
+	progress := func(ev ProgressEvent) {
+		progressMu.Lock()
+		defer progressMu.Unlock()
+		emitProgress(opts.Progress, ev)
+	}
+	for worker := 0; worker < 4 && worker < len(deps); worker++ {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for i := range jobs {
+				dep := deps[i]
+				if dep.Name == "ctxpm" {
+					results[i] = a.checkCtxpmDependency(ctx, dep, m.Agents, opts.CurrentVersion)
+					continue
+				}
+				progress(ProgressEvent{Phase: ProgressStart, Kind: "dependency", Name: dep.Name})
+				// Non-GitHub Git uses the filesystem cache. Keep these resolutions
+				// serial until the cache lock is safe for concurrent operations.
+				serialGit := false
+				if dep.Source != nil && dep.Source.NormalizedType() == "git" {
+					_, _, github := githubRepository(dep.Source.URL)
+					serialGit = !github
+				}
+				if serialGit {
+					gitMu.Lock()
+				}
+				checkCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+				version, err := a.resolveLatestVersion(checkCtx, dep)
+				cancel()
+				if serialGit {
+					gitMu.Unlock()
+				}
+				item := DependencyUpdate{Name: dep.Name, Type: dep.Type, Path: dep.Path,
+					CurrentVersion: dep.Version, Compatibility: manifest.DerivedCompatibilityPaths(m.Agents, dep)}
+				if dep.Source != nil {
+					item.SourceType = dep.Source.NormalizedType()
+				}
+				if err != nil {
+					item.Status, item.Reason = "unresolved", err.Error()
+				} else {
+					item.LatestVersion, item.Status = version, "up_to_date"
+					if dep.Version != version {
+						item.Status = "update_available"
+					}
+				}
+				results[i] = item
+				progress(ProgressEvent{Phase: ProgressDone, Kind: "dependency", Name: dep.Name, Status: item.Status, Version: version, Err: err})
 			}
-			continue
-		}
-		emitProgress(opts.Progress, ProgressEvent{Phase: ProgressStart, Kind: "dependency", Name: dep.Name})
-		version, err := a.resolveLatestVersion(ctx, dep)
-		if err != nil {
-			emitProgress(opts.Progress, ProgressEvent{Phase: ProgressDone, Kind: "dependency", Name: dep.Name, Status: "unresolved", Err: err})
-			results = append(results, DependencyUpdate{
-				Name:           dep.Name,
-				Type:           dep.Type,
-				Path:           dep.Path,
-				SourceType:     dep.Source.NormalizedType(),
-				CurrentVersion: dep.Version,
-				Status:         "unresolved",
-				Reason:         err.Error(),
-				Compatibility:  manifest.DerivedCompatibilityPaths(m.Agents, dep),
-			})
-			continue
-		}
-		status := "up_to_date"
-		if dep.Version != version {
-			status = "update_available"
-		}
-		emitProgress(opts.Progress, ProgressEvent{Phase: ProgressDone, Kind: "dependency", Name: dep.Name, Status: status, Version: version})
-		results = append(results, DependencyUpdate{
-			Name:           dep.Name,
-			Type:           dep.Type,
-			Path:           dep.Path,
-			SourceType:     dep.Source.NormalizedType(),
-			CurrentVersion: dep.Version,
-			LatestVersion:  version,
-			Status:         status,
-			Compatibility:  manifest.DerivedCompatibilityPaths(m.Agents, dep),
-		})
+		}()
 	}
+	for i := range deps {
+		jobs <- i
+	}
+	close(jobs)
+	workers.Wait()
+	// The cache only speeds up future checks; a failed cache write must not
+	// discard otherwise valid remote results.
+	_ = githubScope.save()
 	result := &CheckUpdatesResult{
-		Status:       "checked",
-		CheckedAt:    now.Format(time.RFC3339),
-		Policy:       policy,
-		Dependencies: results,
+		cacheFingerprint: checkManifestFingerprint(m),
+		Status:           "checked",
+		CheckedAt:        now.Format(time.RFC3339),
+		Policy:           policy,
+		Dependencies:     results,
 	}
-	if err := writeCheckState(statePath, result); err != nil {
-		return nil, err
+	if len(opts.Names) == 0 {
+		if err := writeCheckState(statePath, result); err != nil {
+			return nil, err
+		}
 	}
 	return result, nil
 }
@@ -1042,6 +1169,7 @@ func errorFromReason(reason string) error {
 type UpdateOptions struct {
 	Names          []string
 	All            bool
+	Refresh        bool
 	CurrentVersion string
 	DryRun         bool
 	Progress       func(ProgressEvent)
@@ -1058,12 +1186,16 @@ type UpdateAction struct {
 
 type UpdateResult struct {
 	Status  string         `json:"status"`
+	Error   string         `json:"error,omitempty"`
 	Applied []UpdateAction `json:"applied"`
 	Skipped []UpdateAction `json:"skipped"`
 }
 
 func (r UpdateResult) Text() string {
 	lines := []string{"Update status: " + r.Status}
+	if r.Error != "" {
+		lines = append(lines, "Error: "+r.Error)
+	}
 	for _, item := range r.Applied {
 		lines = append(lines, fmt.Sprintf("- %s [%s] %s -> %s", item.Name, item.Status, item.CurrentVersion, item.LatestVersion))
 	}
@@ -1077,7 +1209,17 @@ func (r UpdateResult) Text() string {
 	return strings.Join(lines, "\n") + "\n"
 }
 
-func (a *App) Update(ctx context.Context, opts UpdateOptions) (*UpdateResult, error) {
+func (a *App) Update(ctx context.Context, opts UpdateOptions) (out *UpdateResult, outErr error) {
+	ctx = withGitFetchScope(ctx)
+	var unlock func()
+	if !opts.DryRun {
+		var err error
+		ctx, unlock, err = acquireProjectWrite(ctx, a.Root)
+		if err != nil {
+			return nil, err
+		}
+		defer unlock()
+	}
 	if err := ensureManifestVersion(a.Root, false); err != nil {
 		return nil, err
 	}
@@ -1086,24 +1228,56 @@ func (a *App) Update(ctx context.Context, opts UpdateOptions) (*UpdateResult, er
 		return nil, err
 	}
 	normalizeSharedEntrypoints(m)
-	check, err := a.CheckUpdates(ctx, CheckUpdatesOptions{Force: true, CurrentVersion: opts.CurrentVersion})
-	if err != nil {
-		return nil, err
+	if !opts.All && len(opts.Names) == 0 {
+		return nil, errors.New("no dependencies were selected for update")
 	}
+	for _, name := range opts.Names {
+		if _, ok := findDependency(m.Dependencies, name); !ok {
+			return nil, fmt.Errorf("dependency %q was not found", name)
+		}
+	}
+	var names []string
+	if !opts.All {
+		names = opts.Names
+	}
+	var check *CheckUpdatesResult
+	if !opts.Refresh {
+		interval := m.UpdatePolicy.Interval
+		if interval == "" {
+			interval = manifest.DefaultPolicy().Interval
+		}
+		cached, ok := maybeReuseCheckState(filepath.Join(a.Root, ".ctxpm", "state", "update-checks.json"), time.Now().UTC(), interval, checkManifestFingerprint(m))
+		includeSelf := boolValue(m.UpdatePolicy.IncludeSelf, true) || containsString(names, "ctxpm")
+		if ok && a.refreshCachedCtxpmCheck(cached, m, opts.CurrentVersion, includeSelf) {
+			available := make(map[string]bool, len(cached.Dependencies))
+			for _, item := range cached.Dependencies {
+				available[item.Name] = true
+			}
+			for _, name := range names {
+				if !available[name] {
+					ok = false
+				}
+			}
+			if ok {
+				check = cached
+			}
+		}
+	}
+	if check == nil {
+		check, err = a.CheckUpdates(ctx, CheckUpdatesOptions{Force: true, Explicit: true, Names: names, CurrentVersion: opts.CurrentVersion})
+		if err != nil {
+			return nil, err
+		}
+	}
+	initialFingerprint := checkManifestFingerprint(m)
 	byName := map[string]DependencyUpdate{}
 	for _, item := range check.Dependencies {
 		byName[item.Name] = item
 	}
-	if containsString(opts.Names, "ctxpm") {
-		if dep, ok := findDependency(m.Dependencies, "ctxpm"); ok {
-			byName["ctxpm"] = a.checkCtxpmDependency(ctx, dep, m.Agents, opts.CurrentVersion)
-		}
-	}
-
 	targets := map[string]bool{}
 	if opts.All {
 		for _, item := range check.Dependencies {
-			if item.Status == "update_available" {
+			if item.Status == "update_available" || item.Status == "unresolved" {
 				targets[item.Name] = true
 			}
 		}
@@ -1115,83 +1289,117 @@ func (a *App) Update(ctx context.Context, opts UpdateOptions) (*UpdateResult, er
 	if len(targets) == 0 {
 		return nil, errors.New("no dependencies were selected for update")
 	}
-
 	result := &UpdateResult{Status: ternary(opts.DryRun, "dry_run", "applied")}
-	versionUpdates := map[string]string{}
+	active := map[string]bool{}
 	installState := loadInstallState(a.Root)
-	installStateChanged := false
 	ctxpmSelected := targets["ctxpm"]
-	for i := range m.Dependencies {
-		dep := &m.Dependencies[i]
-		if !targets[dep.Name] {
+	selected := map[string]bool{}
+	versions := map[string]string{}
+	for _, dep := range m.Dependencies {
+		if !targets[dep.Name] || dep.Name == "ctxpm" {
 			continue
 		}
-		updateInfo, ok := byName[dep.Name]
+		item, ok := byName[dep.Name]
 		if !ok {
 			return nil, fmt.Errorf("dependency %q was not found", dep.Name)
 		}
-		if dep.Name == "ctxpm" {
-			continue
-		}
-		switch updateInfo.Status {
+		switch item.Status {
+		case "update_available":
+			selected[dep.Name] = true
+			versions[dep.Name] = item.LatestVersion
+			if opts.DryRun {
+				result.Applied = append(result.Applied, UpdateAction{Name: dep.Name, Status: "would_update", CurrentVersion: dep.Version, LatestVersion: item.LatestVersion})
+			}
 		case "up_to_date":
 			result.Skipped = append(result.Skipped, UpdateAction{Name: dep.Name, Status: "up_to_date"})
-		case "update_available":
-			if opts.DryRun {
-				result.Applied = append(result.Applied, UpdateAction{
-					Name:           dep.Name,
-					Status:         "would_update",
-					CurrentVersion: dep.Version,
-					LatestVersion:  updateInfo.LatestVersion,
-				})
+		default:
+			result.Skipped = append(result.Skipped, UpdateAction{Name: dep.Name, Status: item.Status, Reason: item.Reason})
+		}
+	}
+	defer func() {
+		if outErr == nil {
+			return
+		}
+		out = result
+		result.Error = outErr.Error()
+		result.Status = "failed"
+		if len(result.Applied) > 0 {
+			result.Status = "partial"
+		}
+		finished := map[string]bool{}
+		for _, item := range result.Applied {
+			finished[item.Name] = true
+		}
+		for _, item := range result.Skipped {
+			finished[item.Name] = true
+		}
+		for _, dep := range m.Dependencies {
+			item, ok := byName[dep.Name]
+			if !targets[dep.Name] || !ok || item.Status != "update_available" || finished[dep.Name] {
 				continue
 			}
-			emitProgress(opts.Progress, ProgressEvent{Phase: ProgressStart, Kind: "dependency", Name: dep.Name})
-			installed, err := a.installResource(ctx, m.Agents, dep, updateInfo.LatestVersion)
-			if err != nil {
-				emitProgress(opts.Progress, ProgressEvent{Phase: ProgressDone, Kind: "dependency", Name: dep.Name, Status: "failed", Err: err})
-				return nil, err
+			status := "not_run"
+			reason := ""
+			if active[dep.Name] {
+				status, reason = "failed", outErr.Error()
 			}
-			current := dep.Version
-			dep.Version = installed.Version
-			if current != dep.Version {
-				versionUpdates[dep.Name] = dep.Version
-			}
-			if err := recordInstalledDependency(a.Root, &installState, *dep); err != nil {
-				return nil, err
-			}
-			installStateChanged = true
-			result.Applied = append(result.Applied, UpdateAction{
-				Name:           dep.Name,
-				Status:         "updated",
-				CurrentVersion: current,
-				LatestVersion:  dep.Version,
-			})
-			emitProgress(opts.Progress, ProgressEvent{Phase: ProgressDone, Kind: "dependency", Name: dep.Name, Status: "updated", Version: dep.Version})
-		default:
-			result.Skipped = append(result.Skipped, UpdateAction{Name: dep.Name, Status: updateInfo.Status, Reason: updateInfo.Reason})
+			result.Skipped = append(result.Skipped, UpdateAction{Name: dep.Name, Status: status, CurrentVersion: item.CurrentVersion, LatestVersion: item.LatestVersion, Reason: reason})
 		}
-	}
-	if !opts.DryRun && len(versionUpdates) > 0 {
-		if _, err := manifest.Save(a.Root, m); err != nil {
-			return nil, err
-		}
-	}
-	if !opts.DryRun && len(versionUpdates) > 0 {
-		if _, err := manifest.UpdateResourceVersions(a.Root, versionUpdates); err != nil {
-			return nil, err
-		}
-	}
-	if !opts.DryRun && installStateChanged {
-		if err := saveInstallState(a.Root, installState); err != nil {
-			return nil, err
-		}
+	}()
+	trees, err := buildResourceTrees(a.Root, m, selected)
+	if err != nil {
+		return nil, err
 	}
 	if !opts.DryRun {
-		if _, err := a.Install(ctx, InstallOptions{CurrentVersion: opts.CurrentVersion, SkipCtxpmRelease: ctxpmSelected}); err != nil {
+		for _, tree := range trees {
+			currentManifest, _, err := manifest.Load(a.Root)
+			if err != nil {
+				return nil, err
+			}
+			if checkManifestFingerprint(currentManifest) != initialFingerprint {
+				return nil, errors.New("manifest changed since the update plan was created; run the update again")
+			}
+			treeVersions := map[string]string{}
+			oldVersions := map[string]string{}
+			for _, member := range tree.Members {
+				if v, ok := versions[member.Name]; ok {
+					active[member.Name] = true
+					treeVersions[member.Name] = v
+					oldVersions[member.Name] = member.Version
+					emitProgress(opts.Progress, ProgressEvent{Phase: ProgressStart, Kind: "dependency", Name: member.Name})
+				}
+			}
+			if err := a.commitPreparedResourceTree(ctx, m, tree, treeVersions, &installState); err != nil {
+				return nil, fmt.Errorf("update resource tree %q: %w", tree.Root.Name, err)
+			}
+			initialFingerprint = checkManifestFingerprint(m)
+			for _, member := range tree.Members {
+				if v, ok := treeVersions[member.Name]; ok {
+					delete(active, member.Name)
+					result.Applied = append(result.Applied, UpdateAction{Name: member.Name, Status: "updated", CurrentVersion: oldVersions[member.Name], LatestVersion: v})
+					emitProgress(opts.Progress, ProgressEvent{Phase: ProgressDone, Kind: "dependency", Name: member.Name, Status: "updated", Version: v})
+				}
+			}
+		}
+		// The install step may invoke a new ctxpm process for release syncing;
+		// let that operation acquire its own lock instead of inheriting ours.
+		unlock()
+		ctx = context.WithValue(ctx, projectWriteKey{}, nil)
+		overlaps, err := resourcePathOverlaps(a.Root, m)
+		if err != nil {
+			return nil, err
+		}
+		skipParents := map[string]bool{}
+		for _, overlap := range overlaps {
+			if selected[overlap.Child] && !selected[overlap.Parent] {
+				skipParents[overlap.Parent] = true
+			}
+		}
+		if _, err := a.Install(ctx, InstallOptions{CurrentVersion: opts.CurrentVersion, SkipCtxpmRelease: ctxpmSelected, SkipDependencies: skipParents}); err != nil {
 			return nil, err
 		}
 	}
+
 	if ctxpmSelected {
 		updateInfo, ok := byName["ctxpm"]
 		if !ok {
@@ -1206,12 +1414,14 @@ func (a *App) Update(ctx context.Context, opts UpdateOptions) (*UpdateResult, er
 				break
 			}
 			emitProgress(opts.Progress, ProgressEvent{Phase: ProgressStart, Kind: "release", Name: "ctxpm"})
+			active["ctxpm"] = true
 			ctxpmResult, err := runCtxpmReleaseUpdate(a, ctx, CtxpmReleaseUpdateOptions{Version: updateInfo.LatestVersion, CurrentVersion: opts.CurrentVersion, Force: true})
 			if err != nil {
 				emitProgress(opts.Progress, ProgressEvent{Phase: ProgressDone, Kind: "release", Name: "ctxpm", Status: "failed", Err: err})
 				return nil, err
 			}
 			result.Applied = append(result.Applied, UpdateAction{Name: "ctxpm", Kind: "release", Status: ctxpmResult.Status, CurrentVersion: ctxpmResult.CurrentVersion, LatestVersion: ctxpmResult.LatestVersion})
+			delete(active, "ctxpm")
 			emitProgress(opts.Progress, ProgressEvent{Phase: ProgressDone, Kind: "release", Name: "ctxpm", Status: ctxpmResult.Status, Version: ctxpmResult.LatestVersion})
 		default:
 			result.Skipped = append(result.Skipped, UpdateAction{Name: "ctxpm", Status: updateInfo.Status, Reason: updateInfo.Reason})
@@ -1236,6 +1446,11 @@ func (r RemoveResult) Text() string {
 }
 
 func (a *App) Remove(opts RemoveOptions) (*RemoveResult, error) {
+	_, unlock, err := acquireProjectWrite(context.Background(), a.Root)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	if err := ensureManifestVersion(a.Root, false); err != nil {
 		return nil, err
 	}
@@ -1524,6 +1739,13 @@ func (r MigrateResult) Text() string {
 }
 
 func (a *App) Migrate(opts MigrateOptions) (*MigrateResult, error) {
+	if !opts.DryRun {
+		_, unlock, err := acquireProjectWrite(context.Background(), a.Root)
+		if err != nil {
+			return nil, err
+		}
+		defer unlock()
+	}
 	m, manifestPath, err := manifest.Load(a.Root)
 	if err != nil {
 		return nil, err
@@ -1826,20 +2048,7 @@ func ensureResourcePresence(root string, resource manifest.Resource, kind string
 }
 
 func replacePath(sourcePath, destination string) error {
-	if err := os.RemoveAll(destination); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
-		return err
-	}
-	info, err := os.Stat(sourcePath)
-	if err != nil {
-		return err
-	}
-	if info.IsDir() {
-		return copyDir(sourcePath, destination)
-	}
-	return copyFile(sourcePath, destination, info.Mode())
+	return replacePathSafely(sourcePath, destination)
 }
 
 func copyDir(sourcePath, destination string) error {
@@ -1951,6 +2160,7 @@ func compatibilityGitignoreRules(agents []string, resources []manifest.Resource)
 
 type cachedCheckState struct {
 	SchemaVersion   int                `json:"schema_version"`
+	Fingerprint     string             `json:"fingerprint"`
 	Status          string             `json:"status"`
 	CheckedAt       string             `json:"checked_at"`
 	LastFullCheckAt string             `json:"last_full_check_at"`
@@ -1958,7 +2168,15 @@ type cachedCheckState struct {
 	Dependencies    []DependencyUpdate `json:"dependencies"`
 }
 
-func maybeReuseCheckState(statePath string, now time.Time, interval string) (*CheckUpdatesResult, bool) {
+func checkManifestFingerprint(m *manifest.Manifest) string {
+	data, _ := json.Marshal(struct {
+		Agents       []string
+		Dependencies []manifest.Resource
+	}{m.Agents, m.Dependencies})
+	return fmt.Sprintf("%x", sha256.Sum256(data))
+}
+
+func maybeReuseCheckState(statePath string, now time.Time, interval, fingerprint string) (*CheckUpdatesResult, bool) {
 	data, err := os.ReadFile(statePath)
 	if err != nil {
 		return nil, false
@@ -1967,8 +2185,13 @@ func maybeReuseCheckState(statePath string, now time.Time, interval string) (*Ch
 	if err := json.Unmarshal(data, &cached); err != nil {
 		return nil, false
 	}
-	if cached.SchemaVersion != 3 {
+	if cached.SchemaVersion != 4 || cached.Fingerprint != fingerprint {
 		return nil, false
+	}
+	for _, dep := range cached.Dependencies {
+		if dep.Status == "unresolved" {
+			return nil, false
+		}
 	}
 	last, err := time.Parse(time.RFC3339, cached.CheckedAt)
 	if err != nil {
@@ -1996,7 +2219,8 @@ func writeCheckState(statePath string, result *CheckUpdatesResult) error {
 		return err
 	}
 	data, err := json.MarshalIndent(cachedCheckState{
-		SchemaVersion: 3,
+		SchemaVersion: 4,
+		Fingerprint:   result.cacheFingerprint,
 		Status:        result.Status,
 		CheckedAt:     result.CheckedAt,
 		Dependencies:  result.Dependencies,
@@ -2004,7 +2228,23 @@ func writeCheckState(statePath string, result *CheckUpdatesResult) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(statePath, append(data, '\n'), 0o644)
+	tmp, err := os.CreateTemp(filepath.Dir(statePath), "update-checks-*.json")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if err := tmp.Chmod(0o644); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(append(data, '\n')); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), statePath)
 }
 
 func parseInterval(raw string) (time.Duration, error) {

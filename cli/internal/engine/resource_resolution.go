@@ -73,7 +73,7 @@ func (a *App) resolveGitResource(ctx context.Context, resource manifest.Resource
 	}
 	cleanup := func() { _ = os.RemoveAll(tmpDir) }
 
-	cacheRepo, releaseCache, err := a.gitCacheRepository(ctx, resource.Source.URL)
+	cacheRepo, releaseCache, err := a.gitCacheRepository(ctx, resource.Source.URL, targetVersion)
 	if err != nil {
 		cleanup()
 		return nil, err
@@ -104,9 +104,28 @@ func (a *App) resolveGitResource(ctx context.Context, resource manifest.Resource
 			cleanup()
 			return nil, err
 		}
+	} else if ref := strings.TrimSpace(resource.Source.Ref); ref != "" {
+		// Remote branches are updated by fetch; a clone's local branch may not be.
+		remoteRef := "refs/remotes/origin/" + ref
+		commit, err := runGit(ctx, "-C", cacheRepo, "rev-parse", "--verify", remoteRef+"^{commit}")
+		if err != nil {
+			commit, err = runGit(ctx, "-C", cacheRepo, "rev-parse", "--verify", ref+"^{commit}")
+		}
+		if err != nil {
+			cleanup()
+			return nil, err
+		}
+		if _, err := runGit(ctx, "-C", repoDir, "checkout", "--quiet", strings.TrimSpace(commit)); err != nil {
+			cleanup()
+			return nil, err
+		}
 	} else {
-		// Explicit checkout needed because we used --no-checkout
-		if _, err := runGit(ctx, "-C", repoDir, "checkout", "--quiet"); err != nil {
+		commit, err := runGit(ctx, "-C", cacheRepo, "rev-parse", "--verify", "refs/remotes/origin/HEAD^{commit}")
+		if err != nil {
+			cleanup()
+			return nil, err
+		}
+		if _, err := runGit(ctx, "-C", repoDir, "checkout", "--quiet", strings.TrimSpace(commit)); err != nil {
 			cleanup()
 			return nil, err
 		}

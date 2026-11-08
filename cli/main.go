@@ -356,6 +356,7 @@ func runUpdate(app *engine.App, args []string) error {
 	fs := flag.NewFlagSet("update", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	all := fs.Bool("all", false, "Update every dependency with an available update")
+	refresh := fs.Bool("refresh", false, "Discover current upstream versions instead of reusing a recent check")
 	dryRun := fs.Bool("dry-run", false, "Resolve and report without changing files")
 	jsonOutput := fs.Bool("json", false, "Emit JSON output")
 	if err := fs.Parse(args); err != nil {
@@ -372,11 +373,17 @@ func runUpdate(app *engine.App, args []string) error {
 	result, err := app.Update(context.Background(), engine.UpdateOptions{
 		Names:          fs.Args(),
 		All:            *all,
+		Refresh:        *refresh,
 		CurrentVersion: cliVersion(),
 		DryRun:         *dryRun,
 		Progress:       progress,
 	})
 	if err != nil {
+		if result != nil {
+			if printErr := printMaybeJSON(result, *jsonOutput); printErr != nil {
+				return printErr
+			}
+		}
 		return err
 	}
 	return printMaybeJSON(result, *jsonOutput)
