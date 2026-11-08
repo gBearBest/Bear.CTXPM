@@ -123,6 +123,8 @@ ctxpm install [--type <type>] [--only <name>] [--force] [--dry-run] [--json]
 
 `install` maintains ignored local state in `.ctxpm/state/installed.json`. An unchanged dependency is not fetched again; missing, changed, or newly locked dependencies are restored individually. Git sources reuse ignored object caches under `.ctxpm/cache/git/`, while URL, archive, and Release dependencies only redownload when that dependency's locked version changes. Requires network access only for resources that need restoring and when the locked ctxpm Release differs from the active CLI. Installing a project-locked ctxpm Release updates the project-local CLI without replacing a separate global CLI.
 
+When installing a parent with `--only` or `--type`, nested dependencies outside the selection retain their existing local contents and state; missing unselected dependencies remain missing.
+
 ---
 
 ## doctor
@@ -185,6 +187,8 @@ ctxpm check-updates [--force] [--json]
 
 Requires network access. Safe, read-only — does not modify any files. Run before `update`. In a conversational workflow, this is the discovery step before asking the user to confirm an available update. Do not mention a no-update result unless the user explicitly asks about `ctxpm` status.
 
+Dependency checks run with bounded concurrency and results retain manifest order. The local check cache is invalidated when dependency declarations or agent mappings change; unresolved checks are retried on the next invocation.
+
 ---
 
 ## update
@@ -192,7 +196,7 @@ Requires network access. Safe, read-only — does not modify any files. Run befo
 Apply upstream updates for dependencies. Updating the special `ctxpm` dependency upgrades the CLI, bundled skill, and managed entrypoint template together.
 
 ```
-ctxpm update [<name>...] [--all] [--dry-run] [--json]
+ctxpm update [<name>...] [--all] [--dry-run] [--refresh] [--json]
 ```
 
 | Flag | Description |
@@ -200,9 +204,22 @@ ctxpm update [<name>...] [--all] [--dry-run] [--json]
 | positional `<name>` | One or more dependency names to update. |
 | `--all` | Update every dependency with an available update. |
 | `--dry-run` | Resolve and report without changing files. |
+| `--refresh` | Discover upstream versions again instead of using a recent valid check. |
 | `--json` | Emit JSON output. |
 
 Requires network access. Run `check-updates` first. In a conversational workflow, call this only after the user confirms the proposed update. Use `ctxpm update ctxpm` to upgrade the complete ctxpm release unit explicitly; `ctxpm update --all` includes it when an update is available.
+
+When names are supplied, update discovery checks only those dependencies. The subsequent install and compatibility repair can still inspect or restore other declared resources. `--all` reports dependencies whose update checks could not be resolved as skipped.
+
+A recent successful full check is reused when its manifest still matches; update applies the checked versions, and `--refresh` checks upstream again. GitHub dependencies sharing a repository and ref reuse cached path results when the upstream commit is unchanged.
+
+Nested dependencies form an overlay: a parent supplies the base tree, and each child is installed at its own locked version over that tree. When both parent and child are selected, their selected target versions are used; otherwise children retain their locked versions. A selected child can be updated independently. Equal destinations and overlaps with project packages or the ctxpm release are rejected. Updating a parent requires every nested dependency to have a source and locked version.
+
+Each independent target tree is prepared and committed together with its manifest versions and installation state. An interrupted commit is recovered before the next project write; if files were modified after interruption, recovery stops and retains the backup for inspection. Separate trees in a batch can succeed independently. Compatibility links, entrypoints, and the ctxpm self-update release are handled separately from the resource-tree transaction.
+
+If a later tree fails, the command exits with an error and reports the dependencies already applied, those that failed, and those not run. JSON output contains the same partial result and an `error` field.
+
+The Git object cache uses a new directory and is rebuilt on first use after upgrading. The previous cache is left in place.
 
 ---
 
