@@ -363,6 +363,10 @@ func (a *App) UpdateCtxpmRelease(ctx context.Context, opts CtxpmReleaseUpdateOpt
 		_ = os.Remove(tmpBinary)
 		return nil, fmt.Errorf("downloaded binary verification failed: %w", err)
 	}
+	if err := requireProjectSchemaSupport(ctx, tmpBinary, a.Root); err != nil {
+		_ = os.Remove(tmpBinary)
+		return nil, err
+	}
 	if runtime.GOOS == "windows" {
 		if err := scheduleWindowsSelfUpdate(executable, tmpBinary, a.Root, targetVersion); err != nil {
 			_ = os.Remove(tmpBinary)
@@ -409,6 +413,9 @@ func (a *App) UpdateCtxpmRelease(ctx context.Context, opts CtxpmReleaseUpdateOpt
 }
 
 func synchronizeBundleWithUpdatedCLI(ctx context.Context, executable, projectRoot, expectedVersion string) error {
+	if err := requireProjectSchemaSupport(ctx, executable, projectRoot); err != nil {
+		return err
+	}
 	cmd := exec.CommandContext(ctx, executable, "install", "--only", "ctxpm", "--json")
 	cmd.Dir = projectRoot
 	cmd.Env = append(os.Environ(), CtxpmReleaseSyncEnv+"=1")

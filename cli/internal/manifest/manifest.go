@@ -19,6 +19,7 @@ const manifestIndent = 2
 
 const (
 	CurrentManifestVersion = "1.0"
+	GroupedManifestVersion = "2.0"
 
 	LayoutFile = "file"
 	LayoutDir  = "dir"
@@ -42,18 +43,19 @@ var validTypes = func() map[string]bool {
 }()
 
 type Manifest struct {
-	Version      string                `yaml:"version"`
-	Project      Project               `yaml:"project"`
-	Agents       []string              `yaml:"agents,omitempty"`
-	UpdatePolicy UpdatePolicy          `yaml:"update_policy,omitempty"`
-	Dependencies []Resource            `yaml:"dependencies"`
-	Packages     []Resource            `yaml:"packages"`
+	Version      string       `yaml:"version"`
+	Project      Project      `yaml:"project"`
+	Agents       []string     `yaml:"agents,omitempty"`
+	UpdatePolicy UpdatePolicy `yaml:"update_policy,omitempty"`
+	Dependencies []Resource   `yaml:"dependencies"`
+	Packages     []Resource   `yaml:"packages"`
 
 	// Deprecated: parsed from old yaml for migration detection only; never written back.
 	Entrypoints map[string]Entrypoint `yaml:"entrypoints,omitempty"`
 
 	// legacyFields records deprecated yaml field names detected during Load.
 	legacyFields []string
+	original     []byte
 }
 
 type Project struct {
@@ -112,28 +114,26 @@ func Load(root string) (*Manifest, string, error) {
 		}
 		return nil, manifestPath, err
 	}
-	var m Manifest
-	if err := yaml.Unmarshal(data, &m); err != nil {
-		return nil, manifestPath, err
-	}
-	m.detectLegacyFields()
-	if err := m.Validate(); err != nil {
-		return nil, manifestPath, err
-	}
-	return &m, manifestPath, nil
+	m, err := Parse(data)
+	return m, manifestPath, err
 }
 
 func Save(root string, m *Manifest) (string, error) {
 	manifestPath := filepath.Join(root, "ctxpm.yaml")
-	data, err := marshalManifest(m)
+	data, err := Marshal(m)
 	if err != nil {
 		return "", err
 	}
-	return manifestPath, os.WriteFile(manifestPath, data, 0o644)
+	if err := os.WriteFile(manifestPath, data, 0o644); err != nil {
+		return manifestPath, err
+	}
+	m.original = append([]byte(nil), data...)
+	return manifestPath, nil
 }
 
 func SyncVersion(root string) (bool, error) {
-	return updateManifestVersion(root, CurrentManifestVersion)
+	_, _, err := Load(root)
+	return false, err
 }
 
 func marshalManifest(m *Manifest) ([]byte, error) {
@@ -176,6 +176,15 @@ func UpdateResourceVersions(root string, versions map[string]string) (bool, erro
 		return false, err
 	}
 
+	var header struct {
+		Version string `yaml:"version"`
+	}
+	if err := yaml.Unmarshal(data, &header); err != nil {
+		return false, err
+	}
+	if header.Version != "" && header.Version != CurrentManifestVersion && header.Version != GroupedManifestVersion {
+		return false, fmt.Errorf("unsupported ctxpm.yaml version %s", header.Version)
+	}
 	text := newManifestText(data)
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
@@ -183,6 +192,17 @@ func UpdateResourceVersions(root string, versions map[string]string) (bool, erro
 	}
 	if len(doc.Content) == 0 {
 		return false, errors.New("ctxpm manifest is empty")
+	}
+	if header.Version == GroupedManifestVersion {
+		if _, err := Parse(data); err != nil {
+			return false, err
+		}
+		if rendered, handled, err := groupedVersionFallback(data, doc.Content[0], versions); handled || err != nil {
+			if err != nil {
+				return false, err
+			}
+			return true, os.WriteFile(manifestPath, rendered, 0o644)
+		}
 	}
 
 	edits, err := versionEdits(doc.Content[0], text.lines, versions)
@@ -195,6 +215,9 @@ func UpdateResourceVersions(root string, versions map[string]string) (bool, erro
 
 	sort.SliceStable(edits, func(i, j int) bool {
 		if edits[i].lineIndex == edits[j].lineIndex {
+			if edits[i].kind == edits[j].kind {
+				return edits[i].column > edits[j].column
+			}
 			return edits[i].kind > edits[j].kind
 		}
 		return edits[i].lineIndex > edits[j].lineIndex
@@ -216,33 +239,11 @@ func UpdateResourceVersions(root string, versions map[string]string) (bool, erro
 		}
 	}
 
-	return true, os.WriteFile(manifestPath, []byte(text.String()), 0o644)
-}
-
-func updateManifestVersion(root, nextVersion string) (bool, error) {
-	manifestPath, text, rootNode, err := loadManifestDocument(root)
-	if err != nil {
-		return false, err
-	}
-	if rootNode.Kind != yaml.MappingNode {
-		return false, errors.New("ctxpm manifest root must be a mapping")
-	}
-
-	versionValue := mappingValue(rootNode, "version")
-	if versionValue != nil && strings.TrimSpace(versionValue.Value) == nextVersion {
-		return false, nil
-	}
-
-	if versionValue != nil {
-		updatedLine, err := replaceScalarOnLine(text.lines[versionValue.Line-1], versionValue.Column, nextVersion)
-		if err != nil {
-			return false, err
+	if header.Version == GroupedManifestVersion {
+		if _, err := Parse([]byte(text.String())); err != nil {
+			return false, fmt.Errorf("invalid manifest version edit: %w", err)
 		}
-		text.lines[versionValue.Line-1] = updatedLine
-		return true, os.WriteFile(manifestPath, []byte(text.String()), 0o644)
 	}
-
-	text.lines = insertLine(text.lines, 0, "version: "+nextVersion)
 	return true, os.WriteFile(manifestPath, []byte(text.String()), 0o644)
 }
 
@@ -262,7 +263,7 @@ func (m *Manifest) Validate() error {
 	if strings.TrimSpace(m.Version) == "" {
 		m.Version = CurrentManifestVersion
 	}
-	if m.Version != CurrentManifestVersion {
+	if m.Version != CurrentManifestVersion && m.Version != GroupedManifestVersion {
 		return fmt.Errorf("unsupported ctxpm.yaml version %s", m.Version)
 	}
 	if strings.TrimSpace(m.Project.Name) == "" {
@@ -282,6 +283,9 @@ func (m *Manifest) Validate() error {
 		if err := pkg.validate("package"); err != nil {
 			return err
 		}
+	}
+	if m.Version == GroupedManifestVersion {
+		return validateTargets(m)
 	}
 	return nil
 }
@@ -738,7 +742,16 @@ func versionEdits(root *yaml.Node, lines []string, versions map[string]string) (
 		if sequence == nil || sequence.Kind != yaml.SequenceNode {
 			continue
 		}
-		for _, item := range sequence.Content {
+		items := sequence.Content
+		if target == "dependencies" && scalarValue(root, "version") == GroupedManifestVersion {
+			items = nil
+			for _, group := range sequence.Content {
+				if resources := mappingValue(group, "resources"); resources != nil {
+					items = append(items, resources.Content...)
+				}
+			}
+		}
+		for _, item := range items {
 			if item.Kind != yaml.MappingNode {
 				continue
 			}
@@ -785,6 +798,16 @@ func versionEdits(root *yaml.Node, lines []string, versions map[string]string) (
 }
 
 func addResource(root, section string, resource Resource, sortByName bool) (bool, error) {
+	if m, _, err := Load(root); err != nil {
+		return false, err
+	} else if m.Version == GroupedManifestVersion {
+		if m.HasResource(resource.Name) {
+			return false, fmt.Errorf("resource %q already exists", resource.Name)
+		}
+		m.Dependencies = append(m.Dependencies, resource)
+		_, err = Save(root, m)
+		return err == nil, err
+	}
 	manifestPath, text, rootNode, err := loadManifestDocument(root)
 	if err != nil {
 		return false, err
@@ -817,6 +840,22 @@ func addResource(root, section string, resource Resource, sortByName bool) (bool
 }
 
 func removeResource(root, section, name string) (bool, error) {
+	if m, _, err := Load(root); err != nil {
+		return false, err
+	} else if m.Version == GroupedManifestVersion {
+		resources := &m.Dependencies
+		if section == "packages" {
+			resources = &m.Packages
+		}
+		for i, r := range *resources {
+			if r.Name == name {
+				*resources = append((*resources)[:i], (*resources)[i+1:]...)
+				_, err = Save(root, m)
+				return err == nil, err
+			}
+		}
+		return false, nil
+	}
 	manifestPath, text, rootNode, err := loadManifestDocument(root)
 	if err != nil {
 		return false, err
@@ -1100,7 +1139,7 @@ func replaceScalarOnLine(line string, column int, value string) (string, error) 
 		end := 0
 		for end < len(segment) {
 			r, size := utf8.DecodeRuneInString(segment[end:])
-			if unicode.IsSpace(r) || r == '#' {
+			if unicode.IsSpace(r) || strings.ContainsRune("#,}]", r) {
 				break
 			}
 			end += size

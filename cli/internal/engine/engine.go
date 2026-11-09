@@ -177,9 +177,6 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 		}
 	}
 
-	if m.Version != manifest.CurrentManifestVersion {
-		m.Version = manifest.CurrentManifestVersion
-	}
 	if strings.TrimSpace(m.Project.Name) == "" || opts.Force {
 		m.Project.Name = projectName
 	}
@@ -380,6 +377,16 @@ func (a *App) Add(ctx context.Context, opts AddOptions) (*AddResult, error) {
 	})
 	if err != nil {
 		return nil, err
+	}
+	if m.Version == manifest.GroupedManifestVersion {
+		if err := manifest.CheckDerivedPath(detected.Resource, "dependency"); err != nil {
+			return nil, err
+		}
+		m.Dependencies = append(m.Dependencies, detected.Resource)
+		if err := m.Validate(); err != nil {
+			return nil, err
+		}
+		m.Dependencies = m.Dependencies[:len(m.Dependencies)-1]
 	}
 	if m.HasResource(detected.Name) {
 		return nil, fmt.Errorf("resource %q already exists in ctxpm.yaml", detected.Name)
@@ -1779,6 +1786,9 @@ func (a *App) Migrate(opts MigrateOptions) (*MigrateResult, error) {
 	}
 	selected, err := selectMigrationCandidates(plan.candidates, opts.Paths, opts.All)
 	if err != nil {
+		return nil, err
+	}
+	if err := preflightGroupedMigration(m, selected); err != nil {
 		return nil, err
 	}
 	result := &MigrateResult{

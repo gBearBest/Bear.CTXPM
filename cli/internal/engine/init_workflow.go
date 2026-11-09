@@ -118,6 +118,49 @@ func detectAgentFromManifest(m *manifest.Manifest) string {
 	return ""
 }
 
+// Existing canonical resources keep their location. Resources being relocated
+// must use the same derived destination that the grouped manifest will record.
+func prepareGroupedMigration(m *manifest.Manifest, candidates []discoveredResource) error {
+	if m.Version != manifest.GroupedManifestVersion {
+		return nil
+	}
+	for i := range candidates {
+		candidate := &candidates[i]
+		if !candidate.requiresMigration || m.HasResource(candidate.resource.Name) {
+			continue
+		}
+		p, err := manifest.DerivedResourcePath(candidate.resource, candidate.kind)
+		if err != nil {
+			return err
+		}
+		candidate.resource.Path = p
+	}
+	return nil
+}
+
+// Marshal a prospective manifest before moving any content or creating links.
+// Besides collisions, this checks that all declarations can be saved losslessly.
+func preflightGroupedMigration(m *manifest.Manifest, candidates []discoveredResource) error {
+	if m.Version != manifest.GroupedManifestVersion {
+		return nil
+	}
+	next := *m
+	next.Dependencies = append([]manifest.Resource(nil), m.Dependencies...)
+	next.Packages = append([]manifest.Resource(nil), m.Packages...)
+	for _, candidate := range candidates {
+		if m.HasResource(candidate.resource.Name) {
+			continue
+		}
+		if candidate.kind == "dependency" {
+			next.Dependencies = append(next.Dependencies, candidate.resource)
+		} else {
+			next.Packages = append(next.Packages, candidate.resource)
+		}
+	}
+	_, err := manifest.Marshal(&next)
+	return err
+}
+
 func scanAndMigrateResources(root string, m *manifest.Manifest, projectName string, dryRun bool) (*initResourcePlan, error) {
 	plan := &initResourcePlan{agents: m.Agents}
 	topLevelEntries, err := listTopLevelEntries(root)
@@ -129,11 +172,28 @@ func scanAndMigrateResources(root string, m *manifest.Manifest, projectName stri
 	if err != nil {
 		return nil, err
 	}
+	if err := prepareGroupedMigration(m, candidates); err != nil {
+		return nil, err
+	}
+	var prospective []discoveredResource
+	for _, candidate := range candidates {
+		if candidate.requiresMigration && resourcePathExists(root, candidate.resource.Path) {
+			continue
+		}
+		prospective = append(prospective, candidate)
+	}
+	if err := preflightGroupedMigration(m, prospective); err != nil {
+		return nil, err
+	}
 	for _, candidate := range candidates {
 		if m.HasResource(candidate.resource.Name) {
 			if candidate.requiresMigration {
 				plan.unresolved = append(plan.unresolved, fmt.Sprintf("%s (%s): resource name already exists in ctxpm.yaml", candidate.original, candidate.resource.Name))
 			}
+			continue
+		}
+		if m.Version == manifest.GroupedManifestVersion && candidate.requiresMigration && resourcePathExists(root, candidate.resource.Path) {
+			plan.unresolved = append(plan.unresolved, fmt.Sprintf("%s: canonical path %s already exists", candidate.original, candidate.resource.Path))
 			continue
 		}
 		if dryRun {
@@ -197,6 +257,9 @@ func collectMigrationCandidates(root string, m *manifest.Manifest, projectName s
 	candidates = append(candidates, compatibilityCandidates...)
 	sortDiscoveredResources(candidates)
 	candidates = dedupeDiscoveredResources(candidates)
+	if err := prepareGroupedMigration(m, candidates); err != nil {
+		return nil, err
+	}
 
 	plan := &migrationDiscoveryPlan{}
 	for _, candidate := range candidates {

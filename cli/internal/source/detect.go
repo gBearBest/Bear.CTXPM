@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"os/exec"
 	"path"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -176,7 +175,11 @@ func buildURLDetection(input DetectionInput, rawURL string) (*DetectionResult, e
 		}
 		canonical := input.TargetPath
 		if canonical == "" {
-			canonical = filepath.ToSlash(filepath.Join(".ctxpm", "dependencies", manifest.TypeDir(input.ResourceType), name))
+			var err error
+			canonical, err = manifest.DerivedResourcePath(manifest.Resource{Name: name, Type: input.ResourceType, Layout: layout, Entry: entry, Source: &manifest.Source{Type: "url", URL: rawURL}}, "dependency")
+			if err != nil {
+				return nil, err
+			}
 		}
 		return &DetectionResult{
 			Name:       name,
@@ -219,7 +222,11 @@ func buildURLDetection(input DetectionInput, rawURL string) (*DetectionResult, e
 	}
 	canonical := input.TargetPath
 	if canonical == "" {
-		canonical = filepath.ToSlash(filepath.Join(".ctxpm", "dependencies", manifest.TypeDir(input.ResourceType), base))
+		var err error
+		canonical, err = manifest.DerivedResourcePath(manifest.Resource{Name: name, Type: input.ResourceType, Layout: layout, Entry: entry, Source: &manifest.Source{Type: "url", URL: rawURL}}, "dependency")
+		if err != nil {
+			return nil, err
+		}
 	}
 	return &DetectionResult{
 		Name:       name,
@@ -267,11 +274,7 @@ func inferGitOrArchiveShape(input DetectionInput, rawSourcePath string) (resourc
 		}
 	}
 	if layout == "" {
-		if path.Ext(base) != "" {
-			layout = manifest.LayoutFile
-		} else {
-			layout = manifest.LayoutDir
-		}
+		layout = manifest.InferLayout(sourcePath)
 	}
 	switch layout {
 	case manifest.LayoutFile:
@@ -304,10 +307,10 @@ func inferGitOrArchiveShape(input DetectionInput, rawSourcePath string) (resourc
 	}
 	canonical := input.TargetPath
 	if canonical == "" {
-		if layout == manifest.LayoutDir {
-			canonical = filepath.ToSlash(filepath.Join(".ctxpm", "dependencies", manifest.TypeDir(input.ResourceType), name))
-		} else {
-			canonical = filepath.ToSlash(filepath.Join(".ctxpm", "dependencies", manifest.TypeDir(input.ResourceType), base))
+		var err error
+		canonical, err = manifest.DerivedResourcePath(manifest.Resource{Name: name, Type: input.ResourceType, Layout: layout, Entry: entry, Source: &manifest.Source{Type: "git", Path: sourcePath}}, "dependency")
+		if err != nil {
+			return resourceShape{}, err
 		}
 	}
 	return resourceShape{
