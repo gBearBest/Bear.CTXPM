@@ -309,3 +309,35 @@ ctxpm memory prune [--resource <name>] [--archive] [--json]
 |---|---|
 | `--resource` | Filter to a specific memory resource name. |
 | `--archive` | Archive duplicate and empty files in package memories instead of deleting them. |
+
+---
+
+## manifest
+
+Inspect supported manifest schemas or explicitly convert the configuration:
+
+```
+ctxpm manifest capabilities --json
+ctxpm manifest migrate --to 2.0 [--dry-run] [--json]
+```
+
+`capabilities` emits the executable version and supported schemas without loading
+project configuration. `manifest migrate` converts the current manifest to
+source groups with group-level `type`/upstream `path` defaults, per-resource
+versions and overrides, and derived local paths. It is separate from `ctxpm
+migrate`, which relocates unmanaged resources.
+
+`--dry-run` returns the full preview without writing project files. Applying the
+migration uses the project write lock and recoverable transaction, preserves
+locked versions, and performs no network fetches or file moves. A registered
+ctxpm dependency must already have an installed Release CLI advertising 2.0
+support and matching the project's lock. Resolve unsupported legacy custom
+paths, unknown dependency sources, or target conflicts before conversion.
+
+Existing 1.0 projects retain their schema during ordinary commands, and `init`
+continues to initialize 1.0. Upgrade the project CLI before explicitly converting.
+In 2.0, `add` reuses matching source groups and derives the local target;
+nonstandard `--target-path` is rejected before installation. Its legacy behavior
+remains available for 1.0. `install --only`, `update <name>`, and `remove <name>`
+still operate on individual resources. Runtime JSON `path` fields remain local
+paths even though YAML resource `path` in 2.0 means an upstream override.

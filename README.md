@@ -150,3 +150,22 @@ Bear.CTXPM is suitable for projects that want to maintain AI resources over the 
 ## Related Documents
 
 - [Installation instructions v0.1](INSTALL.md)
+
+### Compact manifests
+
+Schema 2.0 groups dependencies by source and lets a group declare defaults such
+as `type: skill` and `path: skills/{name}`. Resources usually need only `name` and
+`version`; exceptional resources override the upstream path. Canonical local
+paths are derived. Individual resource versioning and updates stay independent.
+
+Existing projects and new `init` runs retain schema 1.0 until explicitly converted:
+
+```sh
+ctxpm manifest capabilities --json
+ctxpm manifest migrate --to 2.0 --dry-run
+ctxpm manifest migrate --to 2.0
+```
+
+Upgrade the project-locked ctxpm CLI first. Conversion preserves installed versions
+and locations, performs no downloads, and rejects legacy paths it cannot represent.
+See [the schema reference](resources/skills/ctxpm/ctxpm-yaml.md#schema-20-dependencies-grouped-by-source).

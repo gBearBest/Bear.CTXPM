@@ -142,3 +142,13 @@ Bear.CTXPM は、AI リソースを長期的に保守したいプロジェクト
 ## 関連ドキュメント
 
 - [インストール手順 v0.1](../INSTALL.md)
+
+### ソースごとにまとめた設定
+
+スキーマ 2.0 は依存リソースをソースごとにまとめ、グループの `type` と
+`path: skills/{name}` を既定値として使用します。各リソースのバージョンと更新は
+独立し、ローカルパスは自動生成されます。通常の操作と新規 `init` は 1.0 を維持します。
+プロジェクトで固定した CLI を先に更新し、`ctxpm manifest capabilities --json` で
+対応を確認してから `ctxpm manifest migrate --to 2.0 --dry-run` で変換を確認してください。
+変換はダウンロード、バージョン更新、ファイル移動を行いません。
+[形式の詳細](../resources/skills/ctxpm/ctxpm-yaml.md#schema-20-dependencies-grouped-by-source)。

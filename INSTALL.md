@@ -742,3 +742,14 @@ Do not start by changing files immediately.
 Prefer the project-local CLI for fixed initialization steps first, then identify, classify, verify, and finish any remaining migration work.
 
 Your goal is not to "generate a pile of new formats", but to make this project from now on have a unified, clear AI resource management structure that other AI agents can continue to take over.
+
+## Optional grouped manifest adoption
+
+Project initialization retains schema 1.0. After installing a Release CLI that
+supports grouped schema 2.0, inspect `ctxpm manifest capabilities --json`, preview
+with `ctxpm manifest migrate --to 2.0 --dry-run`, and apply the conversion only when
+the user requests it. The project-local CLI must match the locked Release and
+advertise support. Conversion does not install, update, or relocate resources;
+nonstandard local paths and unknown dependency sources must be organized first.
+Schema 2.0 uses group-level source/type/path declarations, per-resource overrides
+and versions, and derived local paths. Read the bundled `ctxpm-yaml.md` for details.

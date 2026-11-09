@@ -148,3 +148,15 @@ Bear.CTXPM 适合希望长期维护 AI 资源的项目，尤其适用于：
 ## 相关文档
 
 - [安装指令 v0.1（英文）](../INSTALL.md)
+
+### 按来源分组的紧凑配置
+
+Schema 2.0 将公共 `source` 提升到依赖组，以组级 `type` 和 `path: skills/{name}`
+提供默认值；单个资源通常只需 `name`、`version`，特殊路径由资源 `path` 覆盖。
+本地目录由工具生成，各资源仍独立锁定版本、安装和更新。
+
+普通命令与新项目 `init` 继续保留 1.0。先升级项目锁定的 ctxpm，再通过
+`ctxpm manifest capabilities --json` 查看支持能力，并运行
+`ctxpm manifest migrate --to 2.0 --dry-run` 预览；确认转换后去掉 `--dry-run`。
+转换不联网、不升级、不移动资源，无法无损表示的旧本地路径会被拒绝。
+完整格式见 [schema 参考](../resources/skills/ctxpm/ctxpm-yaml.md#schema-20-dependencies-grouped-by-source)。
