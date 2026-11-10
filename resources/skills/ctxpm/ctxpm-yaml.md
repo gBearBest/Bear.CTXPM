@@ -1,6 +1,8 @@
 # ctxpm.yaml Format
 
-This document defines the `ctxpm.yaml` format used by Bear.CTXPM projects.
+This document defines the `ctxpm.yaml` formats used by Bear.CTXPM projects.
+The original sections describe schema 1.0. The schema 2.0 section below defines
+source groups and derived local paths; use the rules for the declared version.
 
 AI agents must read this format before creating, editing, auditing, or deleting `ctxpm.yaml` entries.
 
@@ -307,3 +309,131 @@ When modifying `ctxpm.yaml`:
 5. Keep `dependencies` and `packages` semantically separate.
 6. Prefer minimal text edits over full-file rewrites when only a small field changes.
 7. Do not add `compatibility` or `entrypoints` fields — they are not part of the schema. Compatibility paths are derived automatically; entrypoints always use `.ctxpm/AGENTS.md` as the managed source plus root-level alias symlinks.
+
+## Schema 2.0: Dependencies Grouped by Source
+
+Schema `2.0` is supported alongside `1.0`. Existing projects keep their current
+schema during ordinary lifecycle commands. To adopt grouping, use the explicit
+manifest migration command after upgrading the project's locked ctxpm release.
+
+```yaml
+version: "2.0"
+project:
+  name: example
+agents:
+  - codex
+
+dependencies:
+  - source:
+      type: git
+      url: https://github.com/example/ai-resources.git
+      ref: main
+    type: skill
+    path: skills/{name}
+    resources:
+      - name: reviewer
+        version: 0123456789abcdef0123456789abcdef01234567
+      - name: legacy-helper
+        path: extras/legacy-helper
+        version: 89abcdef0123456789abcdef0123456789abcdef01
+
+  - source:
+      type: git
+      url: https://github.com/example/ai-resources.git
+      ref: main
+    type: rule
+    path: rules/{name}.md
+    resources:
+      - name: security
+        version: 0123456789abcdef0123456789abcdef01234567
+      - name: notice
+        path: NOTICE
+        layout: file
+        version: 0123456789abcdef0123456789abcdef01234567
+
+packages:
+  - name: create-moment
+    type: skill
+  - name: project-policy
+    type: rule
+    layout: file
+    entry: project-policy.md
+```
+
+### Group and resource fields
+
+- `source.type`, `url`, and `ref` define the group's common upstream source.
+  Different sources or refs require separate groups. `source.entry` and `files`
+  retain their existing meanings; they are optional when the entry is inferable.
+- Group `type` supplies the default resource type; an individual resource's
+  `type` overrides it. `source.type` is the transport, not the AI resource type.
+- Group `path` is an upstream path template for Git/archive resources. It
+  defaults to `{name}`. Only the literal `{name}` placeholder is supported.
+- Resource `path`, when present, is a concrete upstream path that completely
+  overrides the template. It is relative to the repository/extracted root,
+  never relative to the group template. `.` selects that root itself.
+- Every resource declares a unique `name` and keeps its own `version`.
+  Grouping does not synchronize updates or introduce a repository-wide version.
+- `layout` and `entry` are optional resource fields. A filename extension
+  normally implies `file`; otherwise the resource is a directory. Use explicit
+  `layout` for extensionless files or dotted directory names. Skill directories
+  default to `SKILL.md`, memory directories to `MEMORY.md`; other directories
+  require `entry`. Files default to their filename.
+- Empty explicit paths/types/layouts/entries, unknown placeholders, traversal,
+  duplicate names, and colliding local/agent targets are rejected. Portable
+  target collision checks also reject case-only collisions.
+
+### Local paths are derived
+
+Schema 2.0 has no local-path override:
+
+| Resource | Derived canonical local root |
+| --- | --- |
+| Dependency directory | `.ctxpm/dependencies/<type-directory>/<name>` |
+| Dependency file | `.ctxpm/dependencies/<type-directory>/<upstream-filename>` |
+| Package directory | `.ctxpm/packages/<type-directory>/<name>` |
+| Package file | `.ctxpm/packages/<type-directory>/<entry-filename>` |
+
+For example, a rule named `legacy-policy` with `path: legacy/policy.txt` installs
+as `.ctxpm/dependencies/rules/policy.txt`. Its name remains `legacy-policy` for
+CLI selection. Two differently named rules cannot both install as `policy.txt`.
+File packages specify `layout: file` and a filename-only `entry`.
+
+The runtime resource model and CLI JSON outputs still report computed local
+paths. In schema 1.0, resource `path` continues to mean the local path. Never
+copy that field into a schema 2.0 dependency resource's upstream `path`.
+
+### URL and archive compatibility
+
+Git and archive groups support the same templates. Archives preserve existing
+extraction-root semantics. URL sources retain their exact file URL or multi-file
+base URL and `source.files`/`entry`; use one resource per URL group. URL groups
+must not declare a group/resource `path`: no implicit URL joining is introduced.
+File URLs require a concrete filename. URL/archive version hashes and the special
+ctxpm Release version behavior are unchanged.
+
+### Explicit migration
+
+```sh
+ctxpm manifest capabilities --json
+ctxpm manifest migrate --to 2.0 --dry-run
+ctxpm manifest migrate --to 2.0
+```
+
+Migration previews the converted document, then writes it as one recoverable
+transaction when applied. It does not fetch dependencies, discover newer
+versions, move resource files, or change sources. Versions and resolved resource
+semantics must remain equivalent. Unrelated top-level metadata and resource
+extensions are preserved; unknown source extensions require explicit handling.
+
+The project-local ctxpm executable must advertise schema 2.0 support and match
+its locked Release version before conversion. Upgrade ctxpm while still using
+schema 1.0 if this check fails. No minimum release number is guessed. Projects
+without a registered ctxpm dependency do not require this release check.
+
+Nonstandard legacy local paths, dependencies with unknown sources, and target
+conflicts prevent conversion. Keep those projects on 1.0 until organized; ordinary
+commands continue to support that schema. New project initialization currently
+uses 1.0; adoption of 2.0 is explicit. Old published CLIs cannot be made safe by a
+new version field: use the supporting project CLI after migration. This CLI also
+checks downloaded replacement CLIs before invoking them against schema 2.0.

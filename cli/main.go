@@ -79,6 +79,8 @@ func run(args []string) error {
 		return nil
 	case "version", "--version", "-v":
 		return runVersion()
+	case "manifest":
+		return runManifest(app, args[1:])
 	case "init":
 		return runInit(app, args[1:])
 	case "add":
@@ -576,6 +578,7 @@ func printHelp(w *os.File) {
 		"  doctor         Diagnose managed entrypoints and Git dependency hooks",
 		"  list           List dependencies and packages",
 		"  memory         Search, suggest, capture, or prune project memories",
+		"  manifest       Inspect schema capabilities or explicitly migrate configuration",
 		"  validate       Validate ctxpm.yaml and local paths",
 		"  check-updates  Check dependency updates, including the ctxpm release unit",
 		"  update         Update dependencies, including the ctxpm release unit",
@@ -583,6 +586,8 @@ func printHelp(w *os.File) {
 		"",
 		"Examples:",
 		"  ctxpm --version",
+		"  ctxpm manifest capabilities --json",
+		"  ctxpm manifest migrate --to 2.0 --dry-run",
 		"  ctxpm init --agent codex",
 		"  ctxpm add https://github.com/example/ai/tree/main/skills/reviewer --type skill",
 		"  ctxpm add https://gitlab.company.com/team/ai-resources.git --type rule --source-path rules/security",
@@ -597,6 +602,42 @@ func printHelp(w *os.File) {
 
 func resourceTypeUsage() string {
 	return strings.Join(manifest.SupportedTypes(), "|")
+}
+
+func runManifest(app *engine.App, args []string) error {
+	if len(args) == 0 {
+		return failf(2, "usage: ctxpm manifest capabilities|migrate")
+	}
+	switch args[0] {
+	case "capabilities":
+		fs := flag.NewFlagSet("manifest capabilities", flag.ContinueOnError)
+		fs.Bool("json", false, "Emit JSON output")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 0 {
+			return failf(2, "unexpected capabilities arguments")
+		}
+		return json.NewEncoder(os.Stdout).Encode(engine.ManifestCapabilities{Version: cliVersion(), Schemas: []string{manifest.CurrentManifestVersion, manifest.GroupedManifestVersion}})
+	case "migrate":
+		fs := flag.NewFlagSet("manifest migrate", flag.ContinueOnError)
+		target := fs.String("to", manifest.GroupedManifestVersion, "Target manifest schema")
+		dryRun := fs.Bool("dry-run", false, "Preview without writing project files")
+		jsonOutput := fs.Bool("json", false, "Emit JSON output")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 0 {
+			return failf(2, "unexpected migration arguments")
+		}
+		result, err := app.MigrateManifest(context.Background(), engine.ManifestMigrationOptions{To: *target, DryRun: *dryRun})
+		if err != nil {
+			return err
+		}
+		return printMaybeJSON(result, *jsonOutput)
+	default:
+		return failf(2, "unknown manifest command %q", args[0])
+	}
 }
 
 func runVersion() error {

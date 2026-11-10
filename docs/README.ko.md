@@ -106,6 +106,8 @@ project/
 - 내부와 외부 분리: 외부 리소스와 프로젝트 내부 리소스는 저장 위치, 버전 관리 정책, 생명주기에서 명확히 분리됩니다.
 - 완전한 오픈 소스: 프로젝트는 성숙한 오픈 소스 방식으로 발전하며, 가능한 한 기존 오픈 소스 인프라를 재사용합니다.
 
+`.ctxpm/AGENTS.md`, `ctxpm.yaml`, 루트 진입점 심볼릭 링크를 Git에 커밋하면 clone 직후 지침을 읽을 수 있습니다. clone 후 `ctxpm install`을 실행해 무시된 의존성을 복원하고 로컬 hook을 설정하세요. clone에는 ctxpm의 저장소 로컬 hook 설정이 포함되지 않지만 Git은 템플릿이나 전역 설정으로 제공된 hook을 실행할 수 있습니다. Windows 등에서 링크가 일반 파일로 체크아웃되는 경우(`core.symlinks=false`) 심볼릭 링크 지원과 OS 권한을 활성화한 뒤 다시 체크아웃하고 `ctxpm doctor`로 확인하세요. 기존 프로젝트는 이전 진입점 ignore 규칙을 제거하고 링크를 커밋해야 할 수 있습니다. 이전 ctxpm 릴리스에 고정된 프로젝트는 업그레이드할 때까지 이전 동작을 유지할 수 있습니다.
+
 ## AI 표준 워크플로
 
 AI가 Bear.CTXPM 프로젝트를 맡을 때는 다음 흐름을 따르는 것이 좋습니다.
@@ -140,3 +142,13 @@ Bear.CTXPM은 AI 리소스를 장기적으로 유지 관리하려는 프로젝�
 ## 관련 문서
 
 - [설치 지침 v0.1](../INSTALL.md)
+
+### 소스별로 묶은 설정
+
+스키마 2.0은 의존성을 소스별로 묶고 그룹의 `type`과 `path: skills/{name}`을
+기본값으로 사용합니다. 각 리소스의 버전과 업데이트는 독립적이며 로컬 경로는 자동으로
+생성됩니다. 일반 명령과 새 `init`은 1.0을 유지합니다. 프로젝트에 고정된 CLI를 먼저
+업데이트하고 `ctxpm manifest capabilities --json`으로 지원 여부를 확인한 뒤
+`ctxpm manifest migrate --to 2.0 --dry-run`으로 변환을 미리 확인하세요.
+변환은 다운로드, 버전 업데이트 또는 파일 이동을 수행하지 않습니다.
+[형식 참조](../resources/skills/ctxpm/ctxpm-yaml.md#schema-20-dependencies-grouped-by-source).

@@ -19,6 +19,10 @@ type projectWriteKey struct{}
 type projectWriteScope struct{ root string }
 
 func acquireProjectWrite(ctx context.Context, root string) (context.Context, func(), error) {
+	// Validate the schema before even creating local lock/state directories.
+	if err := ensureManifestVersion(root, true); err != nil {
+		return ctx, nil, err
+	}
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return ctx, nil, err

@@ -106,6 +106,8 @@ project/
 - 内外分离：外部资源与项目内资源在存储位置、版本控制策略和生命周期上明确区分。
 - 完全开源：项目采用成熟开源方式演进，并尽量复用现有开源基础设施。
 
+请将 `.ctxpm/AGENTS.md`、`ctxpm.yaml` 和根入口软链接提交到 Git，使新克隆的项目可以读取入口。克隆后运行 `ctxpm install`，恢复被忽略的依赖并配置本地 hook。Windows 等环境若以普通文件检出链接（`core.symlinks=false`），需要启用软链接支持及系统权限后重新检出，并使用 `ctxpm doctor` 检查。已有项目可能需要移除旧入口忽略规则并提交链接；锁定旧版 ctxpm 的项目升级前可能保留旧行为。
+
 ## AI 的标准工作流
 
 当 AI 接管一个 Bear.CTXPM 项目时，建议遵循以下流程：
@@ -121,7 +123,7 @@ project/
 
 `ctxpm.yaml` 将每个外部依赖锁定到明确版本。`ctxpm install` 会恢复这些锁定版本，并使用被忽略的本地状态和 Git 对象缓存，因此未变化的依赖不会再次拉取。它不会发现或自行选择上游新版本；应通过 `ctxpm check-updates` 和需要确认的 `ctxpm update` 流程更新。
 
-`ctxpm init` 与 `ctxpm install` 会在 Git 工作树中默认配置仓库本地 hook，使 `checkout`、基于 merge 的 `pull`、`rebase` 与 `pull --rebase` 后自动执行 `ctxpm install`。Git 不会在 clone 时执行 hook，因此新 clone 会在首次初始化或安装时完成配置。已有的自定义 hook 路径不会被覆盖。`ctxpm doctor` 会报告入口和 hook 状态，`ctxpm install` 会修复 hook。hook 不阻塞 Git 操作。
+`ctxpm init` 与 `ctxpm install` 会在 Git 工作树中默认配置仓库本地 hook，使 `checkout`、基于 merge 的 `pull`、`rebase` 与 `pull --rebase` 后自动执行 `ctxpm install`。克隆不会携带 ctxpm 的仓库本地 hook 配置，因此需在克隆后运行 `ctxpm install`；Git 仍可能运行由模板或全局配置独立提供的 hook。已有的自定义 hook 路径不会被覆盖。`ctxpm doctor` 会报告入口和 hook 状态，`ctxpm install` 会修复 hook。hook 不阻塞 Git 操作。
 
 ## v0.1 非目标
 
@@ -146,3 +148,15 @@ Bear.CTXPM 适合希望长期维护 AI 资源的项目，尤其适用于：
 ## 相关文档
 
 - [安装指令 v0.1（英文）](../INSTALL.md)
+
+### 按来源分组的紧凑配置
+
+Schema 2.0 将公共 `source` 提升到依赖组，以组级 `type` 和 `path: skills/{name}`
+提供默认值；单个资源通常只需 `name`、`version`，特殊路径由资源 `path` 覆盖。
+本地目录由工具生成，各资源仍独立锁定版本、安装和更新。
+
+普通命令与新项目 `init` 继续保留 1.0。先升级项目锁定的 ctxpm，再通过
+`ctxpm manifest capabilities --json` 查看支持能力，并运行
+`ctxpm manifest migrate --to 2.0 --dry-run` 预览；确认转换后去掉 `--dry-run`。
+转换不联网、不升级、不移动资源，无法无损表示的旧本地路径会被拒绝。
+完整格式见 [schema 参考](../resources/skills/ctxpm/ctxpm-yaml.md#schema-20-dependencies-grouped-by-source)。

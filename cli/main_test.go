@@ -53,3 +53,27 @@ func TestRunUpdatePrintsPartialJSONAndReturnsError(t *testing.T) {
 		t.Fatalf("result=%+v", result)
 	}
 }
+
+func TestRunManifestCapabilities(t *testing.T) {
+	read, write, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := os.Stdout
+	os.Stdout = write
+	err = run([]string{"manifest", "capabilities", "--json"})
+	os.Stdout = previous
+	_ = write.Close()
+	output, readErr := io.ReadAll(read)
+	_ = read.Close()
+	if err != nil || readErr != nil {
+		t.Fatal(err, readErr)
+	}
+	var result engine.ManifestCapabilities
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Version == "" || len(result.Schemas) != 2 || result.Schemas[1] != "2.0" {
+		t.Fatalf("%+v", result)
+	}
+}

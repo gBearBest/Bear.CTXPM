@@ -177,9 +177,6 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 		}
 	}
 
-	if m.Version != manifest.CurrentManifestVersion {
-		m.Version = manifest.CurrentManifestVersion
-	}
 	if strings.TrimSpace(m.Project.Name) == "" || opts.Force {
 		m.Project.Name = projectName
 	}
@@ -230,14 +227,12 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 
 	entrypointFile := filepath.Join(a.Root, manifest.CanonicalEntrypointSourceFile())
 	files = append(files, entrypointFile)
-	var gitStaged []string
 	if !opts.DryRun {
 		entrypointFiles, err := syncManagedEntrypoints(a.Root, m, opts.Force)
 		if err != nil {
 			return nil, err
 		}
 		files = append(files, entrypointFiles...)
-		gitStaged = stageEntrypointMigration(a.Root)
 	}
 
 	currentCtxpmVersion := currentCtxpmManifestVersion(opts.CurrentVersion)
@@ -272,12 +267,16 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 			compatibilityGitignoreRules(m.Agents, m.Dependencies)...,
 		))
 		gitignoreRules = dedupe(append(gitignoreRules, compatibilityGitignoreRules(m.Agents, m.Packages)...))
-		gitignoreRules = dedupe(append(gitignoreRules, entrypointGitignoreRules(m)...))
 		updated, err := ensureGitignoreRules(gitignorePath, gitignoreRules)
 		if err != nil {
 			return nil, err
 		}
-		gitignoreUpdated = updated
+		migrated, err := migrateEntrypointGitignore(a.Root, managedEntrypointRules(m))
+		if err != nil {
+			return nil, err
+		}
+		gitignoreUpdated = updated || migrated
+		resourcePlan.warnings = append(resourcePlan.warnings, entrypointCommitGuidance(a.Root, m)...)
 		if _, err := manifest.Save(a.Root, m); err != nil {
 			return nil, err
 		}
@@ -307,7 +306,6 @@ func (a *App) Init(opts InitOptions) (*InitResult, error) {
 		DependenciesCreated:        dedupe(append(resourceNames(resourcePlan.dependencies), "ctxpm")),
 		MigratedResources:          resourcePlan.migrated,
 		GitignoreUpdated:           gitignoreUpdated,
-		GitStaged:                  gitStaged,
 		OwnershipConfirmed:         nil,
 		OwnershipInferred:          dedupe(append(discovery.evidence, resourcePlan.ownershipInferred...)),
 		UnresolvedResources:        dedupe(resourcePlan.unresolved),
@@ -379,6 +377,16 @@ func (a *App) Add(ctx context.Context, opts AddOptions) (*AddResult, error) {
 	})
 	if err != nil {
 		return nil, err
+	}
+	if m.Version == manifest.GroupedManifestVersion {
+		if err := manifest.CheckDerivedPath(detected.Resource, "dependency"); err != nil {
+			return nil, err
+		}
+		m.Dependencies = append(m.Dependencies, detected.Resource)
+		if err := m.Validate(); err != nil {
+			return nil, err
+		}
+		m.Dependencies = m.Dependencies[:len(m.Dependencies)-1]
 	}
 	if m.HasResource(detected.Name) {
 		return nil, fmt.Errorf("resource %q already exists in ctxpm.yaml", detected.Name)
@@ -588,8 +596,9 @@ type InstallAction struct {
 }
 
 type InstallResult struct {
-	Status  string          `json:"status"`
-	Actions []InstallAction `json:"actions"`
+	Status   string          `json:"status"`
+	Actions  []InstallAction `json:"actions"`
+	Warnings []string        `json:"warnings,omitempty"`
 }
 
 func (r InstallResult) Text() string {
@@ -603,6 +612,9 @@ func (r InstallResult) Text() string {
 			line += " version=" + item.Version
 		}
 		lines = append(lines, line)
+	}
+	for _, warning := range r.Warnings {
+		lines = append(lines, "- "+warning)
 	}
 	return strings.Join(lines, "\n") + "\n"
 }
@@ -860,12 +872,11 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 			return nil, err
 		}
 	}
-	if !opts.DryRun && (len(installedResources) > 0 || len(entrypointGitignoreRules(m)) > 0) {
+	if !opts.DryRun {
 		gitignoreRules := dedupe(append(
 			[]string{".ctxpm/dependencies/", ".ctxpm/state/", ".ctxpm/cache/", ".githooks/"},
 			compatibilityGitignoreRules(m.Agents, installedResources)...,
 		))
-		gitignoreRules = dedupe(append(gitignoreRules, entrypointGitignoreRules(m)...))
 		if _, err := ensureGitignoreRules(filepath.Join(a.Root, ".gitignore"), gitignoreRules); err != nil {
 			return nil, err
 		}
@@ -887,6 +898,21 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 		actions = append(actions, InstallAction{Kind: "release", Name: "ctxpm", Status: status, Version: ctxpmReleaseTarget})
 	}
 	if !opts.DryRun {
+		// A locked release may invoke an older CLI that recreates the old rules.
+		// Reacquire the write lock before migrating after that subprocess returns.
+		if ctxpmReleaseTarget != "" {
+			var err error
+			ctx, unlock, err = acquireProjectWrite(ctx, a.Root)
+			if err != nil {
+				return nil, err
+			}
+			defer unlock()
+		}
+		if migrated, err := migrateEntrypointGitignore(a.Root, managedEntrypointRules(m)); err != nil {
+			return nil, err
+		} else if migrated {
+			actions = append(actions, InstallAction{Kind: "entrypoint", Name: ".gitignore", Status: "migrated"})
+		}
 		status, err := a.enableHooksByDefault(ctx)
 		if err != nil {
 			actions = append(actions, InstallAction{Kind: "hook", Name: "git hooks", Status: "failed"})
@@ -894,7 +920,11 @@ func (a *App) Install(ctx context.Context, opts InstallOptions) (*InstallResult,
 			actions = append(actions, InstallAction{Kind: "hook", Name: "git hooks", Status: status})
 		}
 	}
-	return &InstallResult{Status: ternary(opts.DryRun, "dry_run", "applied"), Actions: actions}, nil
+	var warnings []string
+	if !opts.DryRun {
+		warnings = entrypointCommitGuidance(a.Root, m)
+	}
+	return &InstallResult{Status: ternary(opts.DryRun, "dry_run", "applied"), Actions: actions, Warnings: warnings}, nil
 }
 
 func shouldSyncEntrypointFromActiveCLI(m *manifest.Manifest, currentVersion string, bundledRelease bool, pendingRelease string) bool {
@@ -1756,6 +1786,9 @@ func (a *App) Migrate(opts MigrateOptions) (*MigrateResult, error) {
 	}
 	selected, err := selectMigrationCandidates(plan.candidates, opts.Paths, opts.All)
 	if err != nil {
+		return nil, err
+	}
+	if err := preflightGroupedMigration(m, selected); err != nil {
 		return nil, err
 	}
 	result := &MigrateResult{

@@ -103,6 +103,8 @@ Where:
 - Internal and external separation: external resources and project-local resources have clearly separated storage locations, version control policies, and lifecycles.
 - Fully open source: the project evolves in a mature open-source way and reuses existing open-source infrastructure where possible.
 
+Commit `.ctxpm/AGENTS.md`, `ctxpm.yaml`, and the root entrypoint symlinks so a fresh clone can read the instructions. Run `ctxpm install` after cloning to restore ignored dependencies and configure local hooks. A clone does not carry ctxpm’s repository-local hooks; Git may run hooks provided independently through templates or global configuration. On Windows or other systems that check out links as plain files (`core.symlinks=false`), enable symlink support and the necessary OS permissions, then check out the repository again and use `ctxpm doctor` to inspect it. Existing projects may need to remove old entrypoint ignore rules and commit the links. A project locked to an older ctxpm release may retain the old behavior until upgraded.
+
 ## Standard AI Workflow
 
 When an AI takes over a Bear.CTXPM project, it is recommended to follow this workflow:
@@ -137,3 +139,13 @@ Bear.CTXPM is suitable for projects that want to maintain AI resources over the 
 ## Related Documents
 
 - [Installation instructions v0.1](../INSTALL.md)
+
+### Compact source groups
+
+Manifest schema 2.0 groups dependencies by source, with default resource `type`
+and upstream `path: skills/{name}`. Individual resources keep their own versions
+and may override the path; local targets are derived. Ordinary commands and
+new `init` runs retain 1.0. Upgrade the project-locked CLI first, inspect
+`ctxpm manifest capabilities --json`, then preview the explicit conversion using
+`ctxpm manifest migrate --to 2.0 --dry-run`. Applying it does not fetch, upgrade,
+or relocate resources. See [the schema reference](../resources/skills/ctxpm/ctxpm-yaml.md#schema-20-dependencies-grouped-by-source).

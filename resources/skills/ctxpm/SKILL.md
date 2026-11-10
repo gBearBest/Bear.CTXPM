@@ -97,6 +97,10 @@ For multi-file URL or archive resources, compute the version from the full direc
 
 ## Preferred CLI Workflow
 
+In this project, `ctxpm` refers to `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm`, relative to the project root.
+
+If the project-local CLI is unavailable, follow the managed entrypoint's recovery instructions.
+
 When the companion CLI is available, prefer it for routine lifecycle operations:
 
 - `ctxpm install`
@@ -168,7 +172,7 @@ packages:
     entry: MEMORY.md
 ```
 
-Use `.ctxpm/AGENTS.md` as the canonical managed entrypoint source file. All root-level agent entrypoint filenames (`AGENTS.md`, `CLAUDE.md`, `ANTIGRAVITY.md`, `GEMINI.md`, etc.) are symlinks pointing directly to `.ctxpm/AGENTS.md`. Keep all of these root-level symlinks out of Git with `.gitignore`.
+Use `.ctxpm/AGENTS.md` as the canonical managed entrypoint source file. All root-level agent entrypoint filenames (`AGENTS.md`, `CLAUDE.md`, `ANTIGRAVITY.md`, `GEMINI.md`, etc.) are symlinks pointing directly to `.ctxpm/AGENTS.md`. Commit the canonical source file and the root-level entrypoint symlinks for the declared agents to Git. Their relative targets allow a fresh clone to expose the instructions before installing dependencies. Other derived resource compatibility links remain ignored.
 
 ## Lifecycle Rules
 
@@ -197,3 +201,19 @@ Use `.ctxpm/AGENTS.md` as the canonical managed entrypoint source file. All root
 2. Treat `ctxpm` as a special dependency whose update upgrades the CLI, bundled skill, and entrypoint template together from the latest release.
 3. After installing updates, refresh the managed entrypoint block from the selected ctxpm Release's embedded template.
 4. Only update `ctxpm.yaml` when a recorded resource version actually changed.
+
+## Grouped Manifest Adoption
+
+Read the schema 2.0 section of [ctxpm-yaml.md](ctxpm-yaml.md) when a project uses
+`version: "2.0"` or requests a compact manifest. Dependencies are grouped by
+source; group `type` and upstream `path` are defaults, resource fields override
+them, and local paths are derived. Keep each resource's version independent.
+Do not expand compact groups during ordinary edits or confuse the new upstream
+`path` with schema 1.0's local `path`.
+
+Use `ctxpm manifest migrate --to 2.0 --dry-run` for a preview and the same command
+without `--dry-run` only after the user authorizes conversion. Schema migration is
+separate from dependency updates and resource relocation. Check the installed,
+project-locked CLI's capabilities first; an unsupported lock must be upgraded in
+1.0 before conversion. Keep nonrepresentable legacy resources on 1.0. Do not
+silently convert schemas during init/install/update.

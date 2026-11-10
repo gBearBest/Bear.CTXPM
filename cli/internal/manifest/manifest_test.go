@@ -121,33 +121,16 @@ func TestSaveUsesTwoSpaceIndent(t *testing.T) {
 	}
 }
 
-func TestSyncVersionRewritesTopLevelVersion(t *testing.T) {
+func TestSyncVersionRejectsUnknownVersionWithoutWriting(t *testing.T) {
 	root := t.TempDir()
-	original := "" +
-		"version: 2\n" +
-		"project:\n" +
-		"  name: sample\n" +
-		"dependencies: []\n" +
-		"packages: []\n"
+	original := "version: 99.0\nproject: {name: sample}\ndependencies: []\npackages: []\n"
 	writeManifest(t, root, original)
-
 	changed, err := SyncVersion(root)
-	if err != nil {
-		t.Fatalf("SyncVersion() error = %v", err)
+	if err == nil || changed {
+		t.Fatalf("changed=%v err=%v", changed, err)
 	}
-	if !changed {
-		t.Fatalf("SyncVersion() changed = false, want true")
-	}
-
-	got := readManifest(t, root)
-	want := "" +
-		"version: 1.0\n" +
-		"project:\n" +
-		"  name: sample\n" +
-		"dependencies: []\n" +
-		"packages: []\n"
-	if got != want {
-		t.Fatalf("SyncVersion() wrote unexpected YAML\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	if got := readManifest(t, root); got != original {
+		t.Fatal("unsupported schema was modified")
 	}
 }
 
