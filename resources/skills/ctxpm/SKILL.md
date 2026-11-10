@@ -97,6 +97,10 @@ For multi-file URL or archive resources, compute the version from the full direc
 
 ## Preferred CLI Workflow
 
+In this project, `ctxpm` refers to `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm`, relative to the project root.
+
+If the project-local CLI is unavailable, follow the managed entrypoint's recovery instructions.
+
 When the companion CLI is available, prefer it for routine lifecycle operations:
 
 - `ctxpm install`

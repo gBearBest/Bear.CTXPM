@@ -1,7 +1,9 @@
 <!-- ctxpm:begin -->
 This project uses `ctxpm` to manage AI resources: `rules`, `skills`, `specs`, `prompts`, `mcp`, and `memories`.
 
-Read `ctxpm.yaml` first. If the bundled skill at `.ctxpm/dependencies/skills/ctxpm/SKILL.md` is missing (for example after a fresh clone), run `ctxpm install` with an available ctxpm CLI to restore the locked dependencies before reading external resources. If the CLI is unavailable, tell the user installation is needed. Then read task-relevant project resources under `.ctxpm/packages/` before external resources under `.ctxpm/dependencies/`.
+In this project, `ctxpm` refers to `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm`, relative to the project root.
+
+Read `ctxpm.yaml` first. If the project-local CLI is unavailable, ask before installing the locked release from `https://github.com/gBearBest/Bear.CTXPM/releases`; verify its checksum and do not change the lock. If the lock cannot be restored, report the blocker. After restoring the CLI, or if the bundled skill is missing, run `ctxpm install` to restore dependencies. Read task-relevant project resources under `.ctxpm/packages/` before external resources under `.ctxpm/dependencies/`.
 
 At session start, run `ctxpm detect --agent <current-agent>` to verify this agent is enrolled; if the status is `agent_not_enrolled`, ask the user to confirm before running the suggested `ctxpm init --agent <agent>`. At a session boundary, run `ctxpm check-updates` when `update_policy` says the check is enabled and due. Keep non-actionable results silent.
 

@@ -217,6 +217,8 @@ Follow these steps in order. Do not skip steps.
 
 Before migrating resources, try to install or prepare the companion `ctxpm` CLI.
 
+For a cloned project, follow the managed entrypoint's recovery flow. After confirmation, use the official installer with `--scope project --version <locked-tag>` to install and verify the locked release, then run `ctxpm install` to restore its embedded skill and other dependencies. If the lock cannot be restored, report the blocker without changing it.
+
 Recommended order:
 
 1. First define the canonical project-local CLI target as `.ctxpm/dependencies/skills/ctxpm/cli/ctxpm`.
