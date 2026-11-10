@@ -4,6 +4,7 @@ project:
 agents:
   - generic
   - claude-code
+  - codex
 update_policy:
   enabled: true
   interval: 1d
@@ -20,7 +21,7 @@ dependencies:
       path: resources/skills/ctxpm
       ref: latest
       entry: SKILL.md
-    version: v0.1.18
+    version: v0.1.19
   - name: git-commit
     type: skill
     layout: dir
