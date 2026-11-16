@@ -21,7 +21,7 @@ dependencies:
       path: resources/skills/ctxpm
       ref: latest
       entry: SKILL.md
-    version: v0.1.19
+    version: v0.1.20
   - name: git-commit
     type: skill
     layout: dir
@@ -33,7 +33,7 @@ dependencies:
       path: skills/git-commit
       ref: main
       entry: SKILL.md
-    version: e24be77e6f203409cf99ab7d5a67e1540cb386d3
+    version: a8940549dcf7258a2cdaa0b7fc9a9ac7fceec466
 packages:
   - name: ctxpm-release
     type: skill
