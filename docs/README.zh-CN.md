@@ -123,6 +123,8 @@ project/
 
 `ctxpm.yaml` 将每个外部依赖锁定到明确版本。`ctxpm install` 会恢复这些锁定版本，并使用被忽略的本地状态和 Git 对象缓存，因此未变化的依赖不会再次拉取。它不会发现或自行选择上游新版本；应通过 `ctxpm check-updates` 和需要确认的 `ctxpm update` 流程更新。
 
+检查 GitHub 资源更新时，ctxpm 可以使用已有的 GitHub CLI 或 Git 凭据。安装私有资源时，Git 也需要具备仓库读取权限。
+
 `ctxpm init` 与 `ctxpm install` 会在 Git 工作树中默认配置仓库本地 hook，使 `checkout`、基于 merge 的 `pull`、`rebase` 与 `pull --rebase` 后自动执行 `ctxpm install`。克隆不会携带 ctxpm 的仓库本地 hook 配置，因此需在克隆后运行 `ctxpm install`；Git 仍可能运行由模板或全局配置独立提供的 hook。已有的自定义 hook 路径不会被覆盖。`ctxpm doctor` 会报告入口和 hook 状态，`ctxpm install` 会修复 hook。hook 不阻塞 Git 操作。
 
 ## v0.1 非目标

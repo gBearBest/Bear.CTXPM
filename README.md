@@ -125,6 +125,8 @@ After creating or repairing an entrypoint, ctxpm removes its exact root-anchored
 
 `ctxpm.yaml` locks every external dependency to a specific version. `ctxpm install` restores those locked versions and uses ignored local state and Git object caches so unchanged dependencies are not fetched again. It does not discover or select newer upstream resources; use `ctxpm check-updates` and the confirmation-driven `ctxpm update` workflow for that.
 
+For GitHub resources, ctxpm can use existing GitHub CLI or Git credentials when checking for updates. Git must also have read access to install private resources.
+
 `ctxpm init` and `ctxpm install` configure repository-local hooks by default. They run `ctxpm install` after checkout, merge-based pull, rebase, and rebase-based pull. A clone does not carry ctxpm’s repository-local hook configuration, so run `ctxpm install` after cloning to restore dependencies and configure hooks. Git may run hooks provided independently by templates or global configuration. Existing custom hook paths are left unchanged. `ctxpm doctor` reports entrypoint and hook state, while `ctxpm install` repairs hooks. The hooks are non-blocking.
 
 ## Non-goals in v0.1

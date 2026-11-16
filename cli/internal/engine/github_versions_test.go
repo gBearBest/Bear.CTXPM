@@ -2,9 +2,15 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/gBearBest/Bear.CTXPM/cli/internal/manifest"
 )
@@ -151,4 +157,149 @@ func setGitHubAPIBaseURL(t *testing.T, baseURL string) {
 	previous := githubAPIBaseURL
 	githubAPIBaseURL = baseURL
 	t.Cleanup(func() { githubAPIBaseURL = previous })
+}
+
+func TestGitHubVersionUsesGhCredentialsAfterAPIRejection(t *testing.T) {
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "incorrect-token")
+	previous := githubCLIToken
+	githubCLIToken = func(context.Context) (string, error) { return "gh-token", nil }
+	t.Cleanup(func() { githubCLIToken = previous })
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		switch r.Header.Get("Authorization") {
+		case "Bearer incorrect-token":
+			http.Error(w, "denied", http.StatusNotFound)
+		case "Bearer gh-token":
+			_, _ = w.Write([]byte(`[{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]`))
+		default:
+			t.Errorf("unexpected authorization")
+			http.Error(w, "denied", 403)
+		}
+	}))
+	defer server.Close()
+	setGitHubAPIBaseURL(t, server.URL)
+	version, handled, err := New(t.TempDir()).resolveGitHubVersion(context.Background(), githubSkillResource())
+	if err != nil || !handled || version != strings.Repeat("a", 40) || calls != 2 {
+		t.Fatalf("version=%q handled=%v calls=%d err=%v", version, handled, calls, err)
+	}
+}
+
+func TestGitHubVersionFallsBackToGitPathHistory(t *testing.T) {
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "")
+	previous := githubCLIToken
+	githubCLIToken = func(context.Context) (string, error) { return "", errors.New("not logged in") }
+	t.Cleanup(func() { githubCLIToken = previous })
+	var slow atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if slow.Load() {
+			<-r.Context().Done()
+			return
+		}
+		http.Error(w, "denied", http.StatusNotFound)
+	}))
+	defer server.Close()
+	setGitHubAPIBaseURL(t, server.URL)
+	upstream := t.TempDir()
+	initGitRepoForTest(t, upstream)
+	path := filepath.Join(upstream, "skills", "git-commit")
+	if err := os.MkdirAll(path, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "SKILL.md"), []byte("first"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	run := func(args ...string) string {
+		t.Helper()
+		result, err := runGit(context.Background(), append([]string{"-C", upstream}, args...)...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.TrimSpace(result)
+	}
+	run("add", ".")
+	run("commit", "-m", "resource")
+	expected := run("rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(upstream, "other"), []byte("later"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", ".")
+	run("commit", "-m", "unrelated")
+	run("branch", "feature")
+	config := filepath.Join(t.TempDir(), "gitconfig")
+	if err := os.WriteFile(config, []byte("[url \""+filepath.ToSlash(upstream)+"\"]\n insteadOf = https://github.com/github/awesome-copilot.git\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", config)
+	resource := githubSkillResource()
+	resource.Source.Ref = "feature"
+	app := New(t.TempDir())
+	got, err := app.resolveLatestVersion(context.Background(), resource)
+	if err != nil || got != expected {
+		t.Fatalf("version=%q want=%q err=%v", got, expected, err)
+	}
+	resolved, err := app.resolveResource(withGitFetchScope(context.Background()), resource, resolveOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.Version != expected {
+		t.Fatalf("resolved version=%q want=%q", resolved.Version, expected)
+	}
+	content, err := os.ReadFile(filepath.Join(resolved.LocalPath, "SKILL.md"))
+	resolved.Close()
+	if err != nil || string(content) != "first" {
+		t.Fatalf("resolved content=%q err=%v", content, err)
+	}
+	// Reuse the same cache after the upstream changes its default branch.
+	resource.Source.Ref = ""
+	if got, err := app.resolveLatestVersion(context.Background(), resource); err != nil || got != expected {
+		t.Fatalf("initial default version=%q err=%v", got, err)
+	}
+	run("checkout", "feature")
+	if err := os.WriteFile(filepath.Join(path, "SKILL.md"), []byte("feature"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", ".")
+	run("commit", "-m", "feature resource")
+	featureVersion := run("rev-parse", "HEAD")
+	if got, err := app.resolveLatestVersion(context.Background(), resource); err != nil || got != featureVersion {
+		t.Fatalf("changed default version=%q want=%q err=%v", got, featureVersion, err)
+	}
+	// A stalled API must leave the parent context usable for Git fallback.
+	oldTimeout := githubAPILookupTimeout
+	githubAPILookupTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { githubAPILookupTimeout = oldTimeout })
+	slow.Store(true)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if got, err := app.resolveLatestVersion(ctx, resource); err != nil || got != featureVersion {
+		t.Fatalf("timeout fallback version=%q want=%q err=%v", got, featureVersion, err)
+	}
+	slow.Store(false)
+	resource.Source.Path = "missing"
+	if _, err := app.resolveLatestVersion(context.Background(), resource); err == nil {
+		t.Fatal("missing path should not resolve")
+	}
+}
+
+func TestGitHubVersionUsesGhTokenEnvironment(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GH_TOKEN", "gh-env-token")
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.Header.Get("Authorization") != "Bearer gh-env-token" {
+			http.Error(w, "denied", http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(`[{"sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}]`))
+	}))
+	defer server.Close()
+	setGitHubAPIBaseURL(t, server.URL)
+	got, handled, err := New(t.TempDir()).resolveGitHubVersion(context.Background(), githubSkillResource())
+	if err != nil || !handled || got != strings.Repeat("b", 40) || calls != 2 {
+		t.Fatalf("version=%q handled=%v calls=%d err=%v", got, handled, calls, err)
+	}
 }

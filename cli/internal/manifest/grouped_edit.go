@@ -297,6 +297,17 @@ func marshalGrouped(m *Manifest) ([]byte, error) {
 			pkgs.Content = append(pkgs.Content, nodeOf(packageDeclaration(r)))
 		}
 	}
+	// The initial empty sequences encode in flow style ([]). Once populated,
+	// render new manifests as block YAML instead of inheriting that style for
+	// every nested group and resource. Preserve existing manifests' styles.
+	if len(m.original) == 0 {
+		if len(deps.Content) > 0 {
+			deps.Style &^= yaml.FlowStyle
+		}
+		if len(pkgs.Content) > 0 {
+			pkgs.Style &^= yaml.FlowStyle
+		}
+	}
 	var data []byte
 	var err error
 	if len(m.original) == 0 {

@@ -62,7 +62,7 @@ func (a *App) resolveGitResource(ctx context.Context, resource manifest.Resource
 	isGitHub := false
 	if targetVersion == "" {
 		var err error
-		githubVersion, isGitHub, err = resolveGitHubPathVersion(ctx, resource)
+		githubVersion, isGitHub, err = a.resolveGitHubVersion(ctx, resource)
 		if err != nil {
 			return nil, err
 		}

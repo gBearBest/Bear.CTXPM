@@ -43,7 +43,7 @@ type githubCheckScope struct {
 func githubCheckGroupKey(owner, repo, ref string) string {
 	// Credentials are deliberately never written to disk. Separate cache keys
 	// for different tokens prevent a result from crossing permission contexts.
-	sum := sha256.Sum256([]byte(strings.Join([]string{githubAPIBaseURL, strings.ToLower(owner), strings.ToLower(repo), ref, strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))}, "\x00")))
+	sum := sha256.Sum256([]byte(strings.Join([]string{githubAPIBaseURL, strings.ToLower(owner), strings.ToLower(repo), ref, strings.TrimSpace(os.Getenv("GITHUB_TOKEN")), strings.TrimSpace(os.Getenv("GH_TOKEN"))}, "\x00")))
 	return hex.EncodeToString(sum[:])
 }
 
