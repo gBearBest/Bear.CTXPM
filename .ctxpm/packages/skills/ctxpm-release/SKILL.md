@@ -297,6 +297,27 @@ Do not report success merely because the tag exists. Publication is complete
 only after the workflow, notes, assets, `latest`, branch topology, and release
 branch cleanup have all been verified.
 
+### 7. Sync Bear.Best website changelog
+
+After a stable release (or hotfix) is published and verified—skip this step for
+prepare-only runs and `-rc.N` pre-releases—update the `bear-ctxpm` changelog in
+the local `Bear.Best` website repository:
+
+1. **Locate `Bear.Best` dynamically** (do not hardcode an absolute path): search
+   relative to this repository root across sibling directories and up to two
+   directory levels above or below (e.g. `../Bear.Best`, `../../Bear.Best`) for
+   a repository containing `src/data/productChangelog.ts` and
+   `.ctxpm/packages/skills/add-product-changelog/SKILL.md`.
+2. **Follow `Bear.Best`'s `add-product-changelog` skill**: read and follow
+   `<Bear.Best>/.ctxpm/packages/skills/add-product-changelog/SKILL.md` for
+   product `bear-ctxpm`, passing the published version (without leading `v`) and
+   the curated release notes from this release.
+3. Respect `add-product-changelog`'s review and explicit user confirmation gate
+   before committing on `develop`, cherry-picking to `main`, and pushing both
+   branches.
+4. If `Bear.Best` cannot be found locally or is blocked by branch/working-tree
+   state, report the exact status and remaining manual step in the final handoff.
+
 ## Pre-release candidates
 
 Release candidates remain on an open `release/vX.Y.Z` branch. Start and publish
