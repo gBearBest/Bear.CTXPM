@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gBearBest/Bear.CTXPM/cli/internal/manifest"
+	"gopkg.in/yaml.v3"
 )
 
 func TestInstallRepairsPackageCompatibility(t *testing.T) {
@@ -466,6 +467,35 @@ func TestBundledCtxpmAssetsStayInSyncWithResources(t *testing.T) {
 	}
 	if len(seen) != len(bundledCtxpmSkillFiles) {
 		t.Fatalf("embedded files = %d, resource files = %d", len(bundledCtxpmSkillFiles), len(seen))
+	}
+}
+
+func TestBundledCtxpmSkillHasValidFrontmatter(t *testing.T) {
+	file, ok := bundledCtxpmSkillFiles["SKILL.md"]
+	if !ok {
+		t.Fatal("bundled SKILL.md is missing")
+	}
+	content := strings.ReplaceAll(file.Content, "\r\n", "\n")
+	if !strings.HasPrefix(content, "---\n") {
+		t.Fatalf("bundled SKILL.md must start with YAML frontmatter delimiter '---'")
+	}
+	rest := content[len("---\n"):]
+	end := strings.Index(rest, "\n---\n")
+	if end < 0 {
+		t.Fatalf("bundled SKILL.md is missing closing YAML frontmatter delimiter '---'")
+	}
+	var fm struct {
+		Name        string `yaml:"name"`
+		Description string `yaml:"description"`
+	}
+	if err := yaml.Unmarshal([]byte(rest[:end]), &fm); err != nil {
+		t.Fatalf("yaml.Unmarshal(SKILL.md frontmatter) error = %v", err)
+	}
+	if strings.TrimSpace(fm.Name) != "ctxpm" {
+		t.Fatalf("SKILL.md frontmatter name = %q, want %q", fm.Name, "ctxpm")
+	}
+	if strings.TrimSpace(fm.Description) == "" {
+		t.Fatal("SKILL.md frontmatter description must not be empty")
 	}
 }
 
