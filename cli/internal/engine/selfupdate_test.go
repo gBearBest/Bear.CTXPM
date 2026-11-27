@@ -1,6 +1,9 @@
 package engine
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -218,4 +221,146 @@ func TestBundledSkillStatusDetectsUnexpectedDirectory(t *testing.T) {
 	if got := New(root).bundledSkillStatus("v1.2.3"); got != "update_available" {
 		t.Fatalf("bundledSkillStatus() = %q, want update_available", got)
 	}
+}
+
+func setLatestReleaseURL(t *testing.T, rawURL string) {
+	t.Helper()
+	previous := ctxpmLatestReleaseURL
+	ctxpmLatestReleaseURL = rawURL
+	t.Cleanup(func() { ctxpmLatestReleaseURL = previous })
+}
+
+func TestFetchLatestReleaseTagUsesGitHubToken(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "release-token")
+	t.Setenv("GH_TOKEN", "")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer release-token" {
+			t.Fatalf("Authorization = %q, want Bearer release-token", got)
+		}
+		if got := r.Header.Get("X-GitHub-Api-Version"); got != githubAPIVersion {
+			t.Fatalf("X-GitHub-Api-Version = %q, want %q", got, githubAPIVersion)
+		}
+		_, _ = w.Write([]byte(`{"tag_name":"v0.1.22"}`))
+	}))
+	defer server.Close()
+	setLatestReleaseURL(t, server.URL)
+
+	tag, err := fetchLatestReleaseTag(context.Background())
+	if err != nil {
+		t.Fatalf("fetchLatestReleaseTag() error = %v", err)
+	}
+	if tag != "v0.1.22" {
+		t.Fatalf("tag = %q, want v0.1.22", tag)
+	}
+}
+
+func TestFetchLatestReleaseTagUsesGhTokenDirectly(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GH_TOKEN", "gh-env-token")
+
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if got := r.Header.Get("Authorization"); got != "Bearer gh-env-token" {
+			t.Fatalf("Authorization = %q, want Bearer gh-env-token", got)
+		}
+		_, _ = w.Write([]byte(`{"tag_name":"v0.1.22"}`))
+	}))
+	defer server.Close()
+	setLatestReleaseURL(t, server.URL)
+
+	tag, err := fetchLatestReleaseTag(context.Background())
+	if err != nil {
+		t.Fatalf("fetchLatestReleaseTag() error = %v", err)
+	}
+	if tag != "v0.1.22" || calls != 1 {
+		t.Fatalf("tag=%q calls=%d, want v0.1.22 and 1 call", tag, calls)
+	}
+}
+
+func TestFetchLatestReleaseTagFallsBackToGhTokenAndCLIToken(t *testing.T) {
+	t.Run("falls back from GITHUB_TOKEN to GH_TOKEN on 401", func(t *testing.T) {
+		t.Setenv("GITHUB_TOKEN", "bad-token")
+		t.Setenv("GH_TOKEN", "good-gh-token")
+		previous := githubCLIToken
+		githubCLIToken = func(context.Context) (string, error) {
+			t.Fatal("githubCLIToken should not be called when GH_TOKEN succeeds")
+			return "", nil
+		}
+		t.Cleanup(func() { githubCLIToken = previous })
+
+		calls := 0
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls++
+			switch r.Header.Get("Authorization") {
+			case "Bearer bad-token":
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+			case "Bearer good-gh-token":
+				_, _ = w.Write([]byte(`{"tag_name":"v0.1.22"}`))
+			default:
+				t.Errorf("unexpected Authorization header %q", r.Header.Get("Authorization"))
+				http.Error(w, "forbidden", http.StatusForbidden)
+			}
+		}))
+		defer server.Close()
+		setLatestReleaseURL(t, server.URL)
+
+		tag, err := fetchLatestReleaseTag(context.Background())
+		if err != nil || tag != "v0.1.22" || calls != 2 {
+			t.Fatalf("tag=%q calls=%d err=%v", tag, calls, err)
+		}
+	})
+
+	t.Run("falls back to gh CLI token on 403 rate limit", func(t *testing.T) {
+		t.Setenv("GITHUB_TOKEN", "")
+		t.Setenv("GH_TOKEN", "")
+		previous := githubCLIToken
+		githubCLIToken = func(context.Context) (string, error) { return "cli-token", nil }
+		t.Cleanup(func() { githubCLIToken = previous })
+
+		calls := 0
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls++
+			switch r.Header.Get("Authorization") {
+			case "":
+				http.Error(w, "rate limit exceeded", http.StatusForbidden)
+			case "Bearer cli-token":
+				_, _ = w.Write([]byte(`{"tag_name":"v0.1.22"}`))
+			default:
+				t.Errorf("unexpected Authorization header %q", r.Header.Get("Authorization"))
+				http.Error(w, "forbidden", http.StatusForbidden)
+			}
+		}))
+		defer server.Close()
+		setLatestReleaseURL(t, server.URL)
+
+		tag, err := fetchLatestReleaseTag(context.Background())
+		if err != nil || tag != "v0.1.22" || calls != 2 {
+			t.Fatalf("tag=%q calls=%d err=%v", tag, calls, err)
+		}
+	})
+
+	t.Run("does not fall back on 500", func(t *testing.T) {
+		t.Setenv("GITHUB_TOKEN", "")
+		t.Setenv("GH_TOKEN", "")
+		previous := githubCLIToken
+		githubCLIToken = func(context.Context) (string, error) {
+			t.Fatal("githubCLIToken should not be called on 500")
+			return "", nil
+		}
+		t.Cleanup(func() { githubCLIToken = previous })
+
+		calls := 0
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls++
+			http.Error(w, "server error", http.StatusInternalServerError)
+		}))
+		defer server.Close()
+		setLatestReleaseURL(t, server.URL)
+
+		if _, err := fetchLatestReleaseTag(context.Background()); err == nil || calls != 1 {
+			t.Fatalf("calls=%d err=%v, want 1 call and error", calls, err)
+		}
+	})
 }

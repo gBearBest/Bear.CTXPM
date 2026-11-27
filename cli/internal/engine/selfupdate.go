@@ -517,39 +517,86 @@ func readCurrentVersion() string {
 }
 
 func fetchLatestReleaseTag(ctx context.Context) (string, error) {
+	initialToken := strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
+	if initialToken == "" {
+		initialToken = strings.TrimSpace(os.Getenv("GH_TOKEN"))
+	}
+	tag, status, err := fetchLatestReleaseTagWithToken(ctx, initialToken)
+	if err == nil || ctx.Err() != nil || (status != http.StatusUnauthorized && status != http.StatusForbidden && status != http.StatusNotFound && status != http.StatusTooManyRequests) {
+		return tag, err
+	}
+
+	// Never include credential values or gh command output in errors.
+	tried := map[string]struct{}{initialToken: {}}
+	tryToken := func(candidate string) (string, bool) {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			return "", false
+		}
+		if _, seen := tried[candidate]; seen {
+			return "", false
+		}
+		tried[candidate] = struct{}{}
+		result, _, lookupErr := fetchLatestReleaseTagWithToken(ctx, candidate)
+		if lookupErr != nil {
+			err = fmt.Errorf("%v; GitHub authenticated lookup failed: %w", err, lookupErr)
+			return "", false
+		}
+		return result, true
+	}
+
+	if result, ok := tryToken(os.Getenv("GH_TOKEN")); ok {
+		return result, nil
+	}
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+	if out, ghErr := githubCLIToken(ctx); ghErr == nil {
+		if result, ok := tryToken(out); ok {
+			return result, nil
+		}
+	}
+	return "", err
+}
+
+func fetchLatestReleaseTagWithToken(ctx context.Context, token string) (string, int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ctxpmLatestReleaseURL, nil)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("X-GitHub-Api-Version", githubAPIVersion)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
+		return "", resp.StatusCode, fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", err
+		return "", resp.StatusCode, err
 	}
 
 	var release struct {
 		TagName string `json:"tag_name"`
 	}
 	if err := json.Unmarshal(body, &release); err != nil {
-		return "", fmt.Errorf("invalid GitHub API response: %w", err)
+		return "", resp.StatusCode, fmt.Errorf("invalid GitHub API response: %w", err)
 	}
 	if release.TagName == "" {
-		return "", errors.New("could not extract tag_name from GitHub API response")
+		return "", resp.StatusCode, errors.New("could not extract tag_name from GitHub API response")
 	}
-	return release.TagName, nil
+	return release.TagName, resp.StatusCode, nil
 }
 
 func downloadReleaseBinary(ctx context.Context, version string) (string, error) {
