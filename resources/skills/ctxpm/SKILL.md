@@ -1,3 +1,8 @@
+---
+name: ctxpm
+description: Manage project AI resources (rules, skills, specs, prompts, mcp, and memories) with Bear.CTXPM, including creating, installing, validating, updating, migrating, and removing managed dependencies and packages.
+---
+
 # ctxpm
 
 `ctxpm` is the bundled Bear.CTXPM management skill. It gives future AI agents one explicit workflow for creating, installing, validating, updating, and removing AI resources in a project.

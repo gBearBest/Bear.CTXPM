@@ -1,12 +1,17 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -73,6 +78,63 @@ func (a *App) gitCacheRepository(ctx context.Context, sourceURL, targetVersion s
 		scope.mu.Unlock()
 	}
 	return cacheRepo, release, nil
+}
+
+// Shared clones cannot lazy-fetch blobs omitted by the cache's partial clone.
+// Materialize only the selected path's blobs in the promisor cache before
+// checking it out through a shared clone's object alternates.
+func hydrateGitSourcePath(ctx context.Context, cacheRepo, commit, sourcePath string) error {
+	listing, err := runGit(ctx, "-C", cacheRepo, "ls-tree", "-r", "-z", commit, "--", sourcePath)
+	if err != nil {
+		return fmt.Errorf("list git source path %q: %w", sourcePath, err)
+	}
+	var blobs []string
+	for _, record := range strings.Split(listing, "\x00") {
+		if record == "" {
+			continue
+		}
+		metadata, _, ok := strings.Cut(record, "\t")
+		fields := strings.Fields(metadata)
+		if !ok || len(fields) != 3 {
+			return fmt.Errorf("invalid git tree entry in source path %q", sourcePath)
+		}
+		if fields[1] == "blob" {
+			blobs = append(blobs, fields[2])
+		}
+	}
+	if len(blobs) == 0 {
+		return nil
+	}
+	check := exec.CommandContext(ctx, "git", "-C", cacheRepo, "cat-file", "--batch-check")
+	check.Stdin = strings.NewReader(strings.Join(blobs, "\n") + "\n")
+	output, err := check.Output()
+	if err != nil {
+		return fmt.Errorf("check git source blobs for %q: %w", sourcePath, err)
+	}
+	lines := strings.Split(strings.TrimSuffix(string(output), "\n"), "\n")
+	if len(lines) != len(blobs) {
+		return fmt.Errorf("git source path %q returned %d blob checks, expected %d", sourcePath, len(lines), len(blobs))
+	}
+	for i, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || fields[0] != blobs[i] {
+			return fmt.Errorf("invalid blob check for git source path %q", sourcePath)
+		}
+		if fields[1] == "blob" {
+			continue
+		}
+		if fields[1] != "missing" {
+			return fmt.Errorf("unexpected git object type %q in source path %q", fields[1], sourcePath)
+		}
+		fetch := exec.CommandContext(ctx, "git", "-C", cacheRepo, "cat-file", "blob", blobs[i])
+		fetch.Stdout = io.Discard
+		var stderr bytes.Buffer
+		fetch.Stderr = &stderr
+		if err := fetch.Run(); err != nil {
+			return fmt.Errorf("fetch git source blob for %q: %w: %s", sourcePath, err, strings.TrimSpace(stderr.String()))
+		}
+	}
+	return nil
 }
 
 func acquireCacheLock(ctx context.Context, path string) (func(), error) {

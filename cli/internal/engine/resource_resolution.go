@@ -79,6 +79,26 @@ func (a *App) resolveGitResource(ctx context.Context, resource manifest.Resource
 		return nil, err
 	}
 	defer releaseCache()
+	commit := targetVersion
+	if commit == "" {
+		ref := "refs/remotes/origin/HEAD^{commit}"
+		if branch := strings.TrimSpace(resource.Source.Ref); branch != "" {
+			ref = "refs/remotes/origin/" + branch + "^{commit}"
+		}
+		commit, err = runGit(ctx, "-C", cacheRepo, "rev-parse", "--verify", ref)
+		if err != nil && strings.TrimSpace(resource.Source.Ref) != "" {
+			commit, err = runGit(ctx, "-C", cacheRepo, "rev-parse", "--verify", strings.TrimSpace(resource.Source.Ref)+"^{commit}")
+		}
+		if err != nil {
+			cleanup()
+			return nil, err
+		}
+		commit = strings.TrimSpace(commit)
+	}
+	if err := hydrateGitSourcePath(ctx, cacheRepo, commit, resource.Source.Path); err != nil {
+		cleanup()
+		return nil, err
+	}
 	repoDir := filepath.Join(tmpDir, "repo")
 	// A shared clone reuses the persistent cache's Git objects while leaving
 	// sparse-checkout settings isolated to this resolution.
@@ -98,37 +118,11 @@ func (a *App) resolveGitResource(ctx context.Context, resource manifest.Resource
 		return nil, err
 	}
 
-	// Checkout only the sparse paths
-	if targetVersion != "" {
-		if _, err := runGit(ctx, "-C", repoDir, "checkout", "--quiet", targetVersion); err != nil {
-			cleanup()
-			return nil, err
-		}
-	} else if ref := strings.TrimSpace(resource.Source.Ref); ref != "" {
-		// Remote branches are updated by fetch; a clone's local branch may not be.
-		remoteRef := "refs/remotes/origin/" + ref
-		commit, err := runGit(ctx, "-C", cacheRepo, "rev-parse", "--verify", remoteRef+"^{commit}")
-		if err != nil {
-			commit, err = runGit(ctx, "-C", cacheRepo, "rev-parse", "--verify", ref+"^{commit}")
-		}
-		if err != nil {
-			cleanup()
-			return nil, err
-		}
-		if _, err := runGit(ctx, "-C", repoDir, "checkout", "--quiet", strings.TrimSpace(commit)); err != nil {
-			cleanup()
-			return nil, err
-		}
-	} else {
-		commit, err := runGit(ctx, "-C", cacheRepo, "rev-parse", "--verify", "refs/remotes/origin/HEAD^{commit}")
-		if err != nil {
-			cleanup()
-			return nil, err
-		}
-		if _, err := runGit(ctx, "-C", repoDir, "checkout", "--quiet", strings.TrimSpace(commit)); err != nil {
-			cleanup()
-			return nil, err
-		}
+	// Checkout only the sparse paths. Resolve the commit in the cache first;
+	// a clone's local branch may lag behind the cache's remote branch.
+	if _, err := runGit(ctx, "-C", repoDir, "checkout", "--quiet", commit); err != nil {
+		cleanup()
+		return nil, err
 	}
 
 	localPath := filepath.Join(repoDir, filepath.FromSlash(resource.Source.Path))
